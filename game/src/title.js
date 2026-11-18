@@ -7,6 +7,7 @@
 // style + portrait SVGs) so index.html stays untouched.
 import { hasSave, loadGame, saveSummary } from './save.js';
 import { portraitSVG } from './hud.js';
+import { MISSIONS } from './config.js';
 
 let btnContinue = null;
 let btnNew = null;
@@ -114,8 +115,10 @@ export function showTitle(G) {
   if (hasSave()) {
     btnContinue.disabled = false;
     const summary = saveSummary();
-    const pct = summary ? ` — ${summary.percent}% COMPLETE` : '';
-    btnContinue.textContent = `CONTINUE — SAVE SLOT 1${pct}`;
+    const pct = summary ? summary.percent : 0;
+    const jobs = summary ? summary.missionsDone : 0;
+    const cash = summary ? Math.floor(summary.money || 0).toLocaleString('en-US') : '0';
+    btnContinue.textContent = `CONTINUE — JOB ${jobs}/${MISSIONS.length} · $${cash} · ${pct}%`;
   } else {
     btnContinue.disabled = true;
     btnContinue.textContent = 'CONTINUE — NO SAVE YET';

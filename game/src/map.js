@@ -5,7 +5,7 @@
 // calls it directly after staging stats. Rebuild: brighter island fill so
 // the map reads at a glance, a compass rose, and stats that also show the
 // wanted level and cash alongside the measured run numbers.
-import { DISTRICTS, MISSIONS, WORLD, KEYS } from './config.js';
+import { DISTRICTS, MISSIONS, WORLD, KEYS, UPGRADES } from './config.js';
 import { Input } from './input.js';
 
 let canvas = null;
@@ -118,13 +118,19 @@ function refreshStats(G) {
   const wanted = (G.police && typeof G.police.wanted === 'number') ? G.police.wanted : 0;
   const money = G.player ? Math.floor(G.player.money || 0).toLocaleString('en-US') : '0';
   const hours = totalSec >= 3600 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
+  // V3-3: garage upgrade prices, read from the real UPGRADES table (never
+  // hardcoded) — the map now also shows the garage economy.
+  const picks = UPGRADES.filter((u) => ['engine', 'armor', 'nitro', 'paint'].includes(u.id));
+  const parts = picks.map((u) => `${u.id.toUpperCase()} $${u.price.toLocaleString('en-US')}`);
+  const garage = parts.slice(0, 2).join(' · ') + '<br>' + parts.slice(2).join(' · ');
   statsEl.innerHTML =
     `Cars stolen <b>${s.carsStolen || 0}</b><br>` +
     `IDPD escapes <b>${s.escapes || 0}</b><br>` +
     `Jobs done <b>${s.missionsDone || 0} / ${MISSIONS.length}</b><br>` +
     `Play time <b>${hours}</b><br>` +
     `Cash <b>$${money}</b> &nbsp;·&nbsp; Wanted <b>${'★'.repeat(wanted)}${'☆'.repeat(5 - wanted)}</b><br>` +
-    `SAVE SLOT 1 — <b>${pct}% COMPLETE</b>`;
+    `SAVE SLOT 1 — <b>${pct}% COMPLETE</b><br>` +
+    `GARAGE <b>${garage}</b>`;
 }
 
 export function initMap(G) {

@@ -25,6 +25,7 @@ import { spawnEnemy } from './combat.js';
 import { startMission } from './missions.js';
 import { makeCar } from './driving.js';
 import { drawMap } from './map.js';
+import { saveGame } from './save.js';
 
 // ---------------------------------------------------------------- helpers
 // Place the camera in a chase-cam position behind `pos`, facing `heading`.
@@ -210,12 +211,13 @@ function igniteCar(G, carObj, scale) {
 }
 
 // Flip a freshly spawned police car onto its roof (wheels up, light bar up).
-function flipPoliceCar(G, x, z, heading) {
+// `air` lifts it into a mid-flip tumble in the air: { y, pitch, roll }.
+function flipPoliceCar(G, x, z, heading, air) {
   const unit = spawnPoliceCar(G, x, z, heading);
-  unit.mesh.position.y = 1.05;
-  unit.mesh.rotation.set(0, heading, Math.PI * 0.92);
+  unit.mesh.position.y = air ? air.y : 1.05;
+  unit.mesh.rotation.set(air ? (air.pitch || 0) : 0, heading, air ? air.roll : Math.PI * 0.92);
   unit.status = 'FLIPPED';
-  addFire(G, x + 1.5, z + 1, 0.45); // small smoke/fire licking the wreck
+  addFire(G, x + 1.5, z + 1, air ? 0.7 : 0.45); // bigger smoke/fire when airborne
   return unit;
 }
 
@@ -257,6 +259,10 @@ function stageChase(G) {
   G.player.money = 38420;
   G.player.health = 100;
   G.player.armour = 50;
+  // V3-6: nitro owned so the gauge reads NITRO READY, not NOT INSTALLED.
+  if (!G.garage) G.garage = { owned: {} };
+  if (!G.garage.owned) G.garage.owned = {};
+  G.garage.owned.nitro = 1;
 
   // Sun flare right where the chase is heading.
   addSunFlare(G, -700, 135, -245, 320);
@@ -272,13 +278,15 @@ function stageChase(G) {
   setWanted(G, 4);
   const ram = spawnPoliceCar(G, PX - 4.5, PZ - 3.0, H + 2.8);
   ram.status = 'RAMMING';
-  const flipped = flipPoliceCar(G, PX - 12, PZ + 5.5, H + 0.7);
+  // V3-1: the flipped unit is the CENTRE of the cover — caught mid-flip in
+  // the air directly ahead of the GT (not a background wreck).
+  const flipped = flipPoliceCar(G, PX - 8, PZ + 1.5, H + 0.5, { y: 2.2, pitch: 0.35, roll: Math.PI * 0.65 });
   const block = spawnPoliceCar(G, PX - 52, PZ - 1.5, -H);
   block.status = 'ROADBLOCK';
-  const heli = spawnHeli(G, PX - 34, PZ - 16, 18);
+  const heli = spawnHeli(G, PX - 34, PZ - 16, 12); // V3-5: lower, searchlight cone in frame
   G.police.units = [
     { name: 'UNIT 23', dist: 4, status: 'RAMMING', mesh: ram.mesh },
-    { name: 'UNIT 12', dist: 13, status: 'FLIPPED', mesh: flipped.mesh },
+    { name: 'UNIT 12', dist: 8, status: 'FLIPPED', mesh: flipped.mesh },
     { name: 'UNIT 07', dist: 52, status: 'ROADBLOCK', mesh: block.mesh },
     { name: 'HAWK-1', dist: 38, status: 'SEARCHLIGHT', mesh: heli.mesh },
     { name: 'UNIT 31', dist: 210, status: 'PURSUIT', mesh: null },
@@ -294,10 +302,14 @@ function stageChase(G) {
   brightenCar(G, t1);
   brightenCar(G, t2);
   brightenCar(G, t3);
+  // V3-4: one oncoming car + one ped close to the camera so the street reads alive.
+  const t4 = spawnTrafficCar(G, PX - 16, PZ - 6, -H, 'Solano S');
+  brightenCar(G, t4);
   spawnPed(G, PX - 14, PZ + 8);
   spawnPed(G, PX - 22, PZ - 8);
   spawnPed(G, PX - 44, PZ + 8);
   spawnPed(G, PX - 58, PZ - 8);
+  spawnPed(G, PX - 10, PZ + 8);
 
   // Mission 4, stage 2, timer 2:06 — the long Causeway chase.
   startMission(G, 3);
@@ -329,6 +341,17 @@ function stageChase(G) {
 
 // ---------------------------------------------------------------- title
 function stageTitle(G) {
+  // V3-2: stage a REAL save first so Continue shows genuine progress
+  // (JOB 5/8 · $48,250 · 63%) instead of "NO SAVE YET".
+  G.stats.carsStolen = 38;
+  G.stats.escapes = 13;
+  G.stats.playSeconds = 7420;
+  G.stats.missionsDone = 5;
+  G.player.money = 48250;
+  G.player.health = 100;
+  G.player.armour = 50;
+  startMission(G, 5); // Job 6 Konfrontasi — 5 jobs done
+  saveGame(G); // writes the real save; showTitle reads it via saveSummary()
   G.setMode('title');
   // Westward view: Casino Row towers + beach under the sunset, sun in frame.
   // showTitle (via setMode) paints the portraits and reveals HOW TO PLAY.
