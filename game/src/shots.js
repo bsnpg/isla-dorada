@@ -262,7 +262,7 @@ function stageChase(G) {
   addSunFlare(G, -700, 135, -245, 320);
   // Neon billboards lining the road — pink casino sign (south side, facing
   // north toward the road) and a cyan island sign (north side, facing south).
-  addBillboard(G, -198, -270, Math.PI, 'CASINO DORADA', '#ff5ad9', '★ OPEN ALL NIGHT ★');
+  addBillboard(G, -184, -270, Math.PI, 'CASINO DORADA', '#ff5ad9', '★ OPEN ALL NIGHT ★');
   addBillboard(G, -168, -290.5, 0, 'ISLA DORADA', '#4fd9ff', '★ GOLDEN ISLAND ★');
 
   // IDPD with CONTACT: one unit ramming the player's FRONT quarter — angled
@@ -272,13 +272,13 @@ function stageChase(G) {
   setWanted(G, 4);
   const ram = spawnPoliceCar(G, PX - 4.5, PZ - 3.0, H + 2.8);
   ram.status = 'RAMMING';
-  const flipped = flipPoliceCar(G, PX - 20, PZ + 4.5, H + 0.7);
+  const flipped = flipPoliceCar(G, PX - 12, PZ + 5.5, H + 0.7);
   const block = spawnPoliceCar(G, PX - 52, PZ - 1.5, -H);
   block.status = 'ROADBLOCK';
   const heli = spawnHeli(G, PX - 34, PZ - 16, 18);
   G.police.units = [
     { name: 'UNIT 23', dist: 4, status: 'RAMMING', mesh: ram.mesh },
-    { name: 'UNIT 12', dist: 26, status: 'FLIPPED', mesh: flipped.mesh },
+    { name: 'UNIT 12', dist: 13, status: 'FLIPPED', mesh: flipped.mesh },
     { name: 'UNIT 07', dist: 52, status: 'ROADBLOCK', mesh: block.mesh },
     { name: 'HAWK-1', dist: 38, status: 'SEARCHLIGHT', mesh: heli.mesh },
     { name: 'UNIT 31', dist: 210, status: 'PURSUIT', mesh: null },

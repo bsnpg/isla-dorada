@@ -173,6 +173,23 @@ export function drawMap(G) {
 
   drawRoads(c);
 
+  // Buildings: small boxes inside each block so the map reads as a city, not
+  // empty boxes. Blocks are the 80 m grid cells; roads are 12 m wide, so the
+  // boxes sit 10 m inside each block, clear of the road strokes. The west
+  // column is sea / beach, so it stays empty. Layout varies by a hash of the
+  // cell indices, so it is identical every time the map opens.
+  c.fillStyle = '#4d5c7d';
+  for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) {
+    const bx = toPx(-320 + i * 80 + 10);
+    const bz = toPx(-320 + j * 80 + 10);
+    if (bx < toPx(-280)) continue;
+    const v = (i * 7 + j * 13) % 3;
+    c.fillRect(bx, bz, 22, 16);
+    c.fillRect(bx + 30, bz + 4, 18, 20);
+    if (v) c.fillRect(bx + 6, bz + 30, 20, 18);
+    if (v === 2) c.fillRect(bx + 34, bz + 32, 16, 14);
+  }
+
   // District names: small and faint, tucked into each district's top-left corner
   // (district centres coincide with landmark dots, so centre labels collide).
   // Drawn after the roads so road strokes never cross the text.

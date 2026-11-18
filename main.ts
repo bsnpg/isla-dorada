@@ -1,12 +1,12 @@
-// A working gta6-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
-// modules, no library and no network request), and the program hands it in. It copies game/ and
-// screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. Only the plumbing, not an open world: Block
-// Dodger, a plain 2D canvas game where a paddle dodges falling blocks and catches coins, with a
-// title screen, score, lives and levels, game over and restart, flat colours and no sound. Build
-// your own open-world crime game in its place (three.js or any library you vendor under game/),
-// put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover) and run it.
+// Isla Dorada — "8 Jobs to Clear His Name" (gta6-01 entry, Node 22, stdlib only).
+// A three.js open-world crime game: Wowo, an ex-soldier dishonorably discharged,
+// drives, steals cars, outruns the IDPD and works 8 story jobs across a sunset
+// island city to clear his name. The game is this directory's game/ folder,
+// plain static files a desktop browser loads offline (game/index.html and its
+// ES modules, no library code fetched and no network request). This file is
+// the entrypoint: it copies game/ and screenshots/ from beside this file to
+// /output and writes /output/dossier.json, the summary the judge reads, with
+// the vendored make.fun library.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
@@ -19,6 +19,10 @@ import { buildDossier } from './vendor/makefun-game.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+// The entry this file packages (authored for this build).
+const ENTRY_NAME = 'Isla Dorada: 8 Jobs to Clear His Name';
+console.log(`Packaging ${ENTRY_NAME} -> ${out}`);
 
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
