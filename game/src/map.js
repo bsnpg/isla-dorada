@@ -12,6 +12,7 @@ let canvas = null;
 let ctx = null;
 let checklistEl = null;
 let statsEl = null;
+let legendEl = null;
 let currentRoads = null;
 
 const SIZE = 640;
@@ -86,15 +87,41 @@ function drawDiamond(c, x, y, r, color) {
   c.fill();
 }
 
-const LANDMARK_LABELS = [
-  ['casino', 'CASINO DORADA'],
-  ['station', 'IDPD STATION'],
-  ['marina', 'MARINA'],
-  ['warehouse', 'WAREHOUSE'],
-  ['garage', 'GARAGE'],
-  ['impound', 'IMPOUND'],
-  ['causeway', 'CAUSEWAY'],
+// Places on the map: [landmark key, label, marker shape, marker colour].
+// Every entry is a real location in the city (city.js LANDMARK_SPOTS) —
+// the legend is built from this same table, so it can never point at a
+// place that does not exist. Shapes: dot = gold circle, star = casino,
+// square = gas station, diamond = restaurant.
+const POIS = [
+  ['casino', 'CASINO DORADA', 'star', '#f2c230'],
+  ['station', 'IDPD STATION', 'dot', '#f2c230'],
+  ['marina', 'MARINA', 'dot', '#f2c230'],
+  ['warehouse', 'WAREHOUSE', 'dot', '#f2c230'],
+  ['garage', 'GARAGE', 'dot', '#f2c230'],
+  ['impound', 'IMPOUND', 'dot', '#f2c230'],
+  ['causeway', 'CAUSEWAY', 'dot', '#f2c230'],
+  ['harbor', 'HARBOR', 'dot', '#f2c230'],
+  ['ferrisWheel', 'FERRIS WHEEL', 'dot', '#f2c230'],
+  ['gas', 'GAS STATION', 'square', '#ff8a3a'],
+  ['restaurant', 'RESTAURANT', 'diamond', '#ff6ab0'],
 ];
+
+// Where each of the 8 story jobs lives (stage 1 of missions.js — the job's
+// home location). Several jobs share a place, so the badges are drawn as a
+// row above the spot. States come from live G: done = green, current =
+// gold, next = cream.
+const JOB_SPOTS = {
+  casino: [1],
+  marina: [2, 6],
+  impound: [3],
+  causeway: [4, 8],
+  warehouse: [5],
+  station: [7],
+};
+
+const JOB_DONE = '#58b368';
+const JOB_CURRENT = '#f2c230';
+const JOB_NEXT = '#f5efe0';
 
 function refreshChecklist(G) {
   if (!checklistEl) return;
@@ -138,6 +165,7 @@ export function initMap(G) {
   ctx = canvas ? canvas.getContext('2d') : null;
   checklistEl = document.getElementById('map-checklist');
   statsEl = document.getElementById('map-stats');
+  legendEl = document.getElementById('map-legend');
   const btn = document.getElementById('btn-close-map');
   if (btn) btn.addEventListener('click', () => closeMap(G));
   window.addEventListener('keydown', (e) => {
@@ -151,6 +179,125 @@ export function initMap(G) {
       if (!screen.classList.contains('hidden')) drawMap(G);
     }).observe(screen, { attributes: true, attributeFilter: ['class'] });
   }
+}
+
+// Legend panel (HTML, in #map-side): every marker on the map, explained.
+// Built from the same POIS table the canvas draws, plus the live job states,
+// so the legend can never drift from the map. Icons are CSS shapes, not emoji.
+function refreshLegend(G) {
+  if (!legendEl) return;
+  const idx = (G.missions && typeof G.missions.index === 'number') ? G.missions.index : 0;
+  const done = (G.stats && typeof G.stats.missionsDone === 'number') ? G.stats.missionsDone : 0;
+  const cur = idx + 1;
+  const doneJobs = [];
+  const nextJobs = [];
+  for (let i = 1; i <= MISSIONS.length; i++) {
+    if (i < cur || i <= done) doneJobs.push(i);
+    else if (i > cur) nextJobs.push(i);
+  }
+  // Compact ranges ("1–5", "7–8", "1–2, 4") so the legend never wraps.
+  const rangeList = (list) => {
+    if (!list.length) return '—';
+    const out = [];
+    let start = list[0], prev = list[0];
+    for (let i = 1; i <= list.length; i++) {
+      if (list[i] === prev + 1) { prev = list[i]; continue; }
+      out.push(start === prev ? String(start) : `${start}–${prev}`);
+      start = list[i]; prev = list[i];
+    }
+    return out.join(', ');
+  };
+  const swatch = (shape, color) => {
+    const base = 'display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px;';
+    if (shape === 'square') return `<span style="${base}background:${color};border:1px solid #1a2030;"></span>`;
+    if (shape === 'diamond') return `<span style="${base}background:${color};border:1px solid #1a2030;transform:rotate(45deg);"></span>`;
+    if (shape === 'star') return `<span style="${base}background:${color};border:1px solid #1a2030;transform:rotate(45deg);border-radius:2px;"></span>`;
+    return `<span style="${base}background:${color};border:1px solid #1a2030;border-radius:50%;"></span>`;
+  };
+  const rows = [];
+  rows.push(`<div>${swatch('diamond', JOB_CURRENT)}<b>JOB ${cur}</b> — CURRENT</div>`);
+  rows.push(`<div>${swatch('dot', JOB_DONE)}JOB ${rangeList(doneJobs)} — DONE</div>`);
+  rows.push(`<div>${swatch('dot', JOB_NEXT)}JOB ${rangeList(nextJobs)} — NEXT</div>`);
+  for (const [key, label, shape, color] of POIS) rows.push(`<div>${swatch(shape, color)}${label}</div>`);
+  rows.push(`<div><span style="display:inline-block;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:12px solid ${JOB_CURRENT};margin-right:6px;vertical-align:-1px;"></span><b>YOU</b> — PLAYER</div>`);
+  legendEl.innerHTML = `<h3>LEGEND</h3><div class="legend-grid">${rows.join('')}</div>`;
+}
+
+function drawMarkerShape(c, x, y, shape, color) {
+  c.save();
+  c.fillStyle = color;
+  c.strokeStyle = '#1a2030';
+  c.lineWidth = 2;
+  if (shape === 'square') {
+    c.fillRect(x - 6, y - 6, 12, 12);
+    c.strokeRect(x - 6, y - 6, 12, 12);
+  } else if (shape === 'diamond') {
+    c.beginPath();
+    c.moveTo(x, y - 8);
+    c.lineTo(x + 8, y);
+    c.lineTo(x, y + 8);
+    c.lineTo(x - 8, y);
+    c.closePath();
+    c.fill();
+    c.stroke();
+  } else if (shape === 'star') {
+    c.beginPath();
+    c.moveTo(x, y - 9);
+    c.lineTo(x + 3, y - 3);
+    c.lineTo(x + 9, y);
+    c.lineTo(x + 3, y + 3);
+    c.lineTo(x, y + 9);
+    c.lineTo(x - 3, y + 3);
+    c.lineTo(x - 9, y);
+    c.lineTo(x - 3, y - 3);
+    c.closePath();
+    c.fill();
+    c.stroke();
+  } else {
+    c.beginPath();
+    c.arc(x, y, 6, 0, Math.PI * 2);
+    c.fill();
+    c.stroke();
+  }
+  c.restore();
+}
+
+function drawRoute(c, G) {
+  const marker = (G.missions && G.missions.marker) ? posOf(G.missions.marker) : null;
+  const player = (G.player && G.player.pos) ? { x: G.player.pos.x, z: G.player.pos.z } : null;
+  if (!marker || !player) return;
+  if (Math.hypot(marker.x - player.x, marker.z - player.z) < 25) return;
+  const lines = (G.city && G.city.roadLines) || [-280, -200, -120, -40, 40, 120, 200, 280];
+  const nearest = (v) => lines.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
+  const hz = nearest(player.z);
+  const vx = nearest(marker.x);
+  const pts = [
+    [player.x, player.z],
+    [player.x, hz],
+    [vx, hz],
+    [vx, marker.z],
+    [marker.x, marker.z],
+  ];
+  const path = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const [px, pz] = pts[i];
+    const [lx, lz] = path[path.length - 1];
+    if (Math.hypot(px - lx, pz - lz) > 1) path.push([px, pz]);
+  }
+  if (path.length < 2) return;
+  c.save();
+  c.strokeStyle = '#f2c230';
+  c.lineWidth = 3;
+  c.setLineDash([8, 6]);
+  c.globalAlpha = 0.9;
+  c.beginPath();
+  path.forEach(([x, z], i) => {
+    const px = toPx(x), py = toPx(z);
+    if (i === 0) c.moveTo(px, py);
+    else c.lineTo(px, py);
+  });
+  c.stroke();
+  c.restore();
 }
 
 export function drawMap(G) {
@@ -206,22 +353,22 @@ export function drawMap(G) {
     c.fillText(d.name.toUpperCase(), toPx(d.minX) + 8, toPx(d.minZ) + 16);
   }
 
-  // Landmark markers with labels on a dark pill so they stay readable; labels that
-  // would run past the right edge (Causeway) are right-aligned instead.
+  // Route to the current job: a dashed gold line on the road grid, from the
+  // player to the mission marker (Manhattan route via the nearest roads).
+  // Only when the job is far enough to show a route; also a real GPS in play.
+  drawRoute(c, G);
+
+  // POI markers: one shape per place type (see POIS), label on a dark pill
+  // so it stays readable; labels that would run past the right edge
+  // (Causeway) are right-aligned instead.
   const landmarks = (G.city && G.city.landmarks) || {};
   c.font = '700 12px system-ui, sans-serif';
-  for (const [key, label] of LANDMARK_LABELS) {
+  for (const [key, label, shape, color] of POIS) {
     const q = posOf(landmarks[key]);
     if (!q) continue;
     const x = toPx(q.x);
     const y = toPx(q.z);
-    c.fillStyle = '#f2c230';
-    c.beginPath();
-    c.arc(x, y, 6, 0, Math.PI * 2);
-    c.fill();
-    c.strokeStyle = '#1a2030';
-    c.lineWidth = 2;
-    c.stroke();
+    drawMarkerShape(c, x, y, shape, color);
     const w = c.measureText(label).width;
     const pad = 4;
     const right = x + 10 + w + pad * 2 > SIZE - 4;
@@ -231,6 +378,35 @@ export function drawMap(G) {
     c.fillStyle = '#f5efe0';
     c.textAlign = 'left';
     c.fillText(label, tx + pad, y + 4);
+  }
+
+  // Quest badges: numbered circles for all 8 jobs, grouped by place
+  // (JOB_SPOTS mirrors missions.js stage 1). Done = green, current = gold
+  // with a white ring, next = cream. Shared places get a row above the spot.
+  const idx = (G.missions && typeof G.missions.index === 'number') ? G.missions.index : 0;
+  const done = (G.stats && typeof G.stats.missionsDone === 'number') ? G.stats.missionsDone : 0;
+  c.font = '800 11px system-ui, sans-serif';
+  c.textAlign = 'center';
+  for (const [key, jobs] of Object.entries(JOB_SPOTS)) {
+    const q = posOf(landmarks[key]);
+    if (!q) continue;
+    const x = toPx(q.x);
+    const y = toPx(q.z);
+    jobs.forEach((job, k) => {
+      const bx = x + (k - (jobs.length - 1) / 2) * 20;
+      const by = y - 22;
+      const isDone = (job - 1 < idx) || (job - 1 < done);
+      const isCurrent = (job - 1 === idx);
+      c.fillStyle = isDone ? JOB_DONE : (isCurrent ? JOB_CURRENT : JOB_NEXT);
+      c.beginPath();
+      c.arc(bx, by, 9, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = isCurrent ? '#ffffff' : '#1a2030';
+      c.lineWidth = isCurrent ? 2.5 : 1.5;
+      c.stroke();
+      c.fillStyle = '#1a2030';
+      c.fillText(String(job), bx, by + 4);
+    });
   }
 
   // Mission marker: gold diamond.
@@ -279,6 +455,7 @@ export function drawMap(G) {
   currentRoads = null;
   refreshChecklist(G);
   refreshStats(G);
+  refreshLegend(G);
 }
 
 export function openMap(G) {

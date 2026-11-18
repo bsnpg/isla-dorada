@@ -90,11 +90,15 @@
   #map-canvas { border: 2px solid rgba(242,194,48,.6); border-radius: 8px; background: #10141f; }
   #map-side { width: 340px; }
   #map-side h3 { margin: 0 0 8px; color: var(--gold); letter-spacing: 1px; }
-  #map-checklist { list-style: none; margin: 0; padding: 0; font-size: 14px; line-height: 2; }
+  #map-checklist { list-style: none; margin: 0; padding: 0; font-size: 14px; line-height: 1.8; }
   #map-checklist li.done { color: var(--green); text-decoration: line-through; }
   #map-checklist li.current { color: var(--gold); font-weight: 800; }
-  #map-stats { margin-top: 14px; font: 600 13px var(--font-read); color: var(--muted); line-height: 1.9; }
+  #map-stats { margin-top: 10px; font: 600 13px var(--font-read); color: var(--muted); line-height: 1.7; }
   #map-stats b { color: var(--ink); }
+  #map-legend { margin-top: 10px; }
+  #map-legend h3 { margin: 0 0 6px; color: var(--gold); letter-spacing: 1px; }
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font: 600 12px var(--font-read); color: var(--muted); line-height: 1.5; }
+  .legend-grid b { color: var(--ink); }
   /* garage */
   #garage-screen .menu { width: 460px; }
   .upg { display: flex; justify-content: space-between; gap: 10px; background: var(--panel); border: 1px solid rgba(242,194,48,.35); border-radius: 6px; padding: 10px 12px; font-size: 14px; }
@@ -185,6 +189,7 @@
     <h3>ISLA DORADA — CITY MAP</h3>
     <ul id="map-checklist"></ul>
     <div id="map-stats"></div>
+    <div id="map-legend"></div>
     <div class="menu"><button id="btn-close-map">CLOSE — M</button></div>
   </div>
 </div>

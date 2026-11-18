@@ -441,7 +441,9 @@ function stageMap(G) {
   G.stats.playSeconds = 7420;
   G.stats.missionsDone = 5;
   G.player.money = 48250;
-  G.player.pos.set(-120, 0, 240); // Marina — player arrow on the map
+  // Player at the (40, 200) road junction by the garage, not on top of the
+  // Marina job — so the map shows the dashed gold route to JOB 6.
+  G.player.pos.set(40, 0, 200);
   G.player.heading = Math.PI;
   startMission(G, 5);
   G.setMode('map');

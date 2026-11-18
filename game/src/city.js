@@ -24,6 +24,10 @@ export const LANDMARK_SPOTS = {
   boardwalk: { x: -292, z: 0 },
   harbor: { x: 160, z: 280 },
   beach: { x: -300, z: 0 },
+  // Map rework: real POIs the map points to — a fuel stop and a restaurant,
+  // so the map legend has somewhere to go (both are real 3D locations below).
+  gas: { x: 120, z: -120 },
+  restaurant: { x: -120, z: 120 },
 };
 
 // Pure data export for other builders: no G needed.
@@ -40,6 +44,8 @@ export function getLandmarks() {
     boardwalk: { ...LANDMARK_SPOTS.boardwalk },
     harbor: { ...LANDMARK_SPOTS.harbor },
     beach: { ...LANDMARK_SPOTS.beach },
+    gas: { ...LANDMARK_SPOTS.gas },
+    restaurant: { ...LANDMARK_SPOTS.restaurant },
   };
 }
 
@@ -64,6 +70,10 @@ const LANDMARK_BUILDINGS = [
   { key: 'station', w: 26, d: 18, h: 18, color: 0x3a5a8a, sign: 'IDPD STATION', signColor: '#6aa8ff', signBg: '#0a1428' },
   { key: 'marina', w: 22, d: 14, h: 10, color: 0x4a7a8a, sign: 'MARINA', signColor: '#7ec8e8', signBg: '#082028' },
   { key: 'garage', w: 24, d: 16, h: 12, color: 0x8a3a3a, sign: 'GARAGE', signColor: '#ff8a6a', signBg: '#280a0a' },
+  // Map rework: fuel stop + restaurant — real buildings with real signs, so the
+  // map legend points at places that exist in the 3D city, not just icons.
+  { key: 'gas', w: 20, d: 14, h: 8, color: 0x8a5a2a, sign: 'GAS STATION', signColor: '#ffb347', signBg: '#201408' },
+  { key: 'restaurant', w: 22, d: 14, h: 10, color: 0x8a3a5a, sign: 'RESTAURANT', signColor: '#ff8ab0', signBg: '#280a1a' },
 ];
 
 // Exclusion zones for regular buildings: landmark plazas + buildings, the
@@ -81,6 +91,10 @@ const EXCLUSIONS = [
   { x: -206, z: -120, r: 10 },  // neon billboard, Casino Row
   { x: 195, z: -60, r: 10 },    // neon billboard, causeway approach
   { x: 165, z: 262, r: 34 },    // harbor container yard
+  { x: 120, z: -120, r: 22 },   // gas station plaza
+  { x: 144, z: -96, r: 30 },    // gas station building
+  { x: -120, z: 120, r: 22 },   // restaurant plaza
+  { x: -96, z: 144, r: 30 },    // restaurant building
 ];
 
 function excluded(x, z) {
@@ -414,6 +428,35 @@ export function buildCity(G) {
       crown.position.set(bx, lb.h + 2.1, bz);
       scene.add(crown);
       animated.signMats.push(neonPink);
+    }
+    if (lb.key === 'gas') {
+      // Forecourt canopy on four legs + two pumps, west of the building
+      // (toward the x=120 road) — so the fuel stop reads as a gas station.
+      const canopy = new THREE.Mesh(
+        boxGeo,
+        new THREE.MeshStandardMaterial({ color: 0xd96a2a, roughness: 0.7 }),
+      );
+      canopy.scale.set(16, 0.8, 12);
+      canopy.position.set(bx - 16, 5.5, bz);
+      canopy.castShadow = true;
+      scene.add(canopy);
+      for (const [lx, lz] of [[-22, -4], [-22, 4], [-10, -4], [-10, 4]]) {
+        const leg = new THREE.Mesh(boxGeo, poleMat);
+        leg.scale.set(0.5, 5.5, 0.5);
+        leg.position.set(bx + lx, 2.75, bz + lz);
+        scene.add(leg);
+      }
+      for (const pz of [-3, 3]) {
+        const pump = new THREE.Mesh(
+          boxGeo,
+          new THREE.MeshStandardMaterial({ color: 0xc23a3a, roughness: 0.6 }),
+        );
+        pump.scale.set(1.2, 1.7, 0.9);
+        pump.position.set(bx - 16, 0.85, bz + pz);
+        pump.castShadow = true;
+        scene.add(pump);
+      }
+      colliders.push({ x: bx - 16, z: bz, r: 4 });
     }
     colliders.push({ x: bx, z: bz, r: Math.hypot(lb.w, lb.d) / 2 });
   }
