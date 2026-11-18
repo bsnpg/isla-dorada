@@ -266,5 +266,9 @@ function runShot(name) {
 }
 
 boot();
+// Diagnostic handle for headless verification (diag-isla.mjs / playtests):
+// the live game state, so a test can spawn drops and drive the player over
+// them without touching gameplay. Read-only from the game's point of view.
+window.__G = G;
 if (shotName) runShot(shotName);
 else requestAnimationFrame(frame);

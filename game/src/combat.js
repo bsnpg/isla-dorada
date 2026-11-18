@@ -14,6 +14,7 @@ import { Input } from './input.js';
 import { clamp, lerp } from './random.js';
 import { makeCar, setCarOnFire, spawnFire, spawnSmoke, spawnSparks } from './driving.js';
 import { setWanted, spawnFlippedPoliceCar, spawnPoliceCar, spawnRammingPolice } from './police.js';
+import { initDrops, spawnEnemyDrop, updateDrops } from './drops.js';
 
 const TRACER_POOL = 16;
 const TRACER_LIFE = 0.09;
@@ -83,6 +84,7 @@ function makeHumanoid(kind) {
 }
 
 export function initCombat(G) {
+  initDrops(G); // enemy drops: cash + weapon pickups from downed enemies
   G.combat = {
     weaponIndex: 0,
     weapons: WEAPONS.map((w) => ({ ...w })), // deep copy of the rack
@@ -309,7 +311,8 @@ function tryFire(G) {
     if (best.hp <= 0) {
       best.state = 'falling';
       best.fallTimer = 0;
-      G.player.money += 50;
+      // No instant payout: the kill pays through the drop he leaves when
+      // his body hits the ground (spawnEnemyDrop, in updateEnemy below).
     }
   } else {
     // Miss: the round still hits something — sparks where the tracer ends.
@@ -339,6 +342,7 @@ function updateEnemy(G, e, dt) {
     e.mesh.position.y = 0.15 * f;
     if (e.fallTimer >= 0.9) {
       e.state = 'downed';
+      spawnEnemyDrop(G, e); // the body lands — his cash (+ weapon) drops with him
       G.combat.downed.push(e);
       const i = G.combat.enemies.indexOf(e);
       if (i >= 0) G.combat.enemies.splice(i, 1);
@@ -427,6 +431,9 @@ export function updateCombat(G, dt) {
 
   // Enemies act even while the player is in a car (they keep closing in).
   for (const e of [...c.enemies]) updateEnemy(G, e, dt);
+
+  // Drops bob on the asphalt and are collected by walking/driving over them.
+  updateDrops(G, dt);
 
   if (G.mode !== 'play') return;
 

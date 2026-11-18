@@ -21,7 +21,8 @@ import { renderHUD, showDialogue, pushScorePopup } from './hud.js';
 import { renderMinimap } from './minimap.js';
 import { setWanted, spawnPoliceCar, spawnHeli } from './police.js';
 import { spawnTrafficCar, spawnPed } from './traffic.js';
-import { spawnEnemy } from './combat.js';
+import { spawnEnemy, spawnDownedEnemy } from './combat.js';
+import { dropCash, dropWeapon } from './drops.js';
 import { startMission } from './missions.js';
 import { makeCar } from './driving.js';
 import { drawMap } from './map.js';
@@ -292,6 +293,17 @@ function stageChase(G) {
     { name: 'UNIT 31', dist: 210, status: 'PURSUIT', mesh: null },
   ];
 
+  // Enemy drops on the asphalt (recording #10): the flipped unit threw its
+  // officer out — he is down on the north shoulder, his cash stack and his
+  // SMG lying beside him, glowing green and gold. Kept on the road's north
+  // edge, right of the popup stack and clear of the flipped car, so the loot
+  // reads at a glance. The cover moment (the airborne flipped car over the
+  // GT) is untouched.
+  spawnDownedEnemy(G, PX - 10, PZ - 8.2, 'gunman');
+  dropCash(G, PX - 8, PZ - 7.6, 250);
+  dropWeapon(G, PX - 12.5, PZ - 7.8, 1); // SMG +30
+  pushScorePopup(G, '+30', 'cash', 'SMG AMMO PICKED UP');
+
   // A BURNING traffic car ahead on the right shoulder, plus live traffic
   // ahead (one oncoming) and pedestrians on both sidewalks.
   const burning = spawnTrafficCar(G, PX - 38, PZ, H, 'Palma Cruiser');
@@ -402,6 +414,13 @@ function stageCombat(G) {
   down.fallTimer = 0.9;
   down.mesh.rotation.x = -Math.PI / 2; // flat on his back
   down.mesh.position.y = 0.25;
+
+  // Enemy drops (recording #10): the downed gunman already dropped his loot
+  // — a green cash stack beside his body and his pistol on the asphalt with
+  // a floating "PISTOL +24" label, both glowing so they read in the frame.
+  dropCash(G, downP.x + 1.4, downP.z + 1.2, 250);
+  dropWeapon(G, downP.x - 1.2, downP.z + 1.8, 0); // Pistol +24
+  pushScorePopup(G, '+$250', 'cash', 'CASH PICKED UP');
 
   // A burning pickup on the right flank, flames + smoke in frame.
   const burnP = offsetFrom(PX, PZ, H, 14, 8);
