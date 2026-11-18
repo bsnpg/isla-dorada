@@ -1,61 +1,157 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
-
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
-
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
-export const STEP = 1 / 60;
-
-export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+// Isla Dorada — game configuration and data.
+// All names, places, vehicles, missions and radio stations are original.
+export const GAME = {
+  title: 'Isla Dorada: 8 Jobs to Clear His Name',
+  shortTitle: 'ISLA DORADA',
+  version: '1.0.0',
+  saveKey: 'isla-dorada-save-v1',
 };
 
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const WORLD = {
+  size: 640,            // island is 640 x 640 metres, centred on (0,0)
+  roadGap: 80,          // city grid spacing
+  roadWidth: 12,
+  beachX: -300,         // beach strip along the west edge
+  seaLevel: -0.5,
+  seedDefault: 1,
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
+// Named districts. districtAt(x, z) returns the district name for the minimap.
+export const DISTRICTS = [
+  { name: 'Beachfront',  minX: -320, maxX: -200, minZ: -320, maxZ: 320,  color: '#e8b64c' },
+  { name: 'Casino Row',  minX: -200, maxX: -40,  minZ: -320, maxZ: -80,  color: '#f0d060' },
+  { name: 'Old Town',    minX: -200, maxX: -40,  minZ: -80,  maxZ: 160,  color: '#c98a4b' },
+  { name: 'Marina',      minX: -200, maxX: -40,  minZ: 160,  maxZ: 320,  color: '#4fb3d9' },
+  { name: 'Palm Heights',minX: -40,  maxX: 200,  minZ: -320, maxZ: 0,    color: '#7ec850' },
+  { name: 'Harbor',      minX: -40,  maxX: 200,  minZ: 0,    maxZ: 320,  color: '#5a8fd9' },
+  { name: 'Causeway',    minX: 200,  maxX: 320,  minZ: -80,  maxZ: 80,   color: '#d9a05a' },
+];
+
+export function districtAt(x, z) {
+  for (const d of DISTRICTS) {
+    if (x >= d.minX && x < d.maxX && z >= d.minZ && z < d.maxZ) return d;
+  }
+  return DISTRICTS[0];
+}
+
+// The 8 staged story jobs of the "Bersihkan Nama" (Clear His Name) arc.
+// Wowo, ex-Sergeant, dishonorably discharged, must clear his name.
+export const MISSIONS = [
+  {
+    id: 1, name: 'Pendaratan', code: 'JOB 1/8',
+    briefing: 'WOWO: Fresh off the boat. One driving job for the casino and I am out. Easy money.',
+    objective: 'Drive the casino boss to Casino Dorada',
+    next: 'JOB 2 — Cari Saksi', wanted: 0,
+  },
+  {
+    id: 2, name: 'Cari Saksi', code: 'JOB 2/8',
+    briefing: 'WOWO: The witness saw who framed me. Pick her up before the IDPD tail finds her.',
+    objective: 'Pick up the witness, lose the police tail',
+    next: 'JOB 3 — Curi Bukti', wanted: 1,
+  },
+  {
+    id: 3, name: 'Curi Bukti', code: 'JOB 3/8',
+    briefing: 'WOWO: The evidence is in the impound lot. Walk in, take it, walk out. Quietly.',
+    objective: 'Steal the evidence from the police impound',
+    next: 'JOB 4 — Kejar-kejaran Causeway', wanted: 2,
+  },
+  {
+    id: 4, name: 'Kejar-kejaran Causeway', code: 'JOB 4/8',
+    briefing: 'WOWO: Evidence in hand. Now I have to outrun the whole island to deliver it.',
+    objective: 'Deliver the evidence across the Causeway — outrun the IDPD',
+    next: 'JOB 5 — Gudang Senjata', wanted: 4,
+  },
+  {
+    id: 5, name: 'Gudang Senjata', code: 'JOB 5/8',
+    briefing: 'WOWO: I need firepower before the endgame. The warehouse crew will not hand it over.',
+    objective: 'Clear the warehouse, take the weapons cache',
+    next: 'JOB 6 — Konfrontasi', wanted: 2,
+  },
+  {
+    id: 6, name: 'Konfrontasi', code: 'JOB 6/8',
+    briefing: 'WOWO: The officer who framed me is finally in front of me. This ends tonight.',
+    objective: 'Confront Officer Braga at the Marina',
+    next: 'JOB 7 — Bukti Terakhir', wanted: 3,
+  },
+  {
+    id: 7, name: 'Bukti Terakhir', code: 'JOB 7/8',
+    briefing: 'WOWO: One recording left, inside the police station. In and out. No mistakes.',
+    objective: 'Steal the recording from the IDPD station',
+    next: 'JOB 8 — Bebas', wanted: 4,
+  },
+  {
+    id: 8, name: 'Bebas', code: 'JOB 8/8',
+    briefing: 'WOWO: Everything I need is in this car. Five stars, one road out. Let us go home.',
+    objective: 'Escape Isla Dorada — wanted level 5, reach the Causeway',
+    next: 'FREEDOM', wanted: 5,
+  },
+];
+
+// Original vehicles (no commercial names).
+export const VEHICLES = [
+  { name: 'Aurea GT',     topSpeed: 62, accel: 26, grip: 2.6, color: 0xd8a020, kind: 'sport' },
+  { name: 'Solano S',     topSpeed: 55, accel: 22, grip: 2.4, color: 0x3f7fd9, kind: 'sedan' },
+  { name: 'Palma Cruiser',topSpeed: 48, accel: 18, grip: 2.2, color: 0xe8e0d0, kind: 'sedan' },
+  { name: 'Faro Pickup',  topSpeed: 50, accel: 20, grip: 2.0, color: 0x7a4a2a, kind: 'pickup' },
+  { name: 'Cayo Coupe',   topSpeed: 58, accel: 24, grip: 2.5, color: 0xc23a3a, kind: 'sport' },
+  { name: 'Marina Taxi',  topSpeed: 46, accel: 17, grip: 2.1, color: 0xf2c230, kind: 'taxi' },
+];
+
+export const POLICE = {
+  dept: 'IDPD',
+  deptFull: 'Isla Dorada Police Department',
+  carName: 'IDPD Interceptor',
+  heliName: 'IDPD Hawk',
+  // Named response units shown in the HUD police list.
+  unitNames: ['UNIT 12', 'UNIT 07', 'UNIT 23', 'UNIT 31', 'HAWK-1', 'UNIT 18'],
+  statuses: ['PURSUIT', 'RAMMING', 'ROADBLOCK', 'BOXING IN', 'SEARCHLIGHT', 'EN ROUTE'],
 };
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
+// Weapon rack slots 1-4.
+export const WEAPONS = [
+  { name: 'Pistol',  damage: 34, rate: 0.32, ammo: 48,  range: 60 },
+  { name: 'SMG',     damage: 18, rate: 0.09, ammo: 120, range: 45 },
+  { name: 'Shotgun', damage: 70, rate: 0.9,  ammo: 24,  range: 25 },
+  { name: 'Rifle',   damage: 55, rate: 0.14, ammo: 90,  range: 90 },
+];
 
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
+// Procedural radio stations (WebAudio, no audio files).
+export const RADIO = [
+  { name: 'RADIO SOL 92.5', genre: 'Sunset Pop',   bpm: 104, root: 57 },
+  { name: 'DORADA FM 101.3', genre: 'Island Beats', bpm: 122, root: 53 },
+  { name: 'PALMA 77.7',     genre: 'Night Drive',  bpm: 90,  root: 50 },
+];
 
+// Garage upgrades (prices in $).
+export const UPGRADES = [
+  { id: 'engine',  name: 'Turbo Engine',   desc: '+25% top speed',        price: 2500, max: 3 },
+  { id: 'armor',   name: 'Armored Plating',desc: '+50 max health (car)',  price: 1800, max: 3 },
+  { id: 'brakes',  name: 'Sport Brakes',   desc: '+30% braking, +grip',   price: 1200, max: 2 },
+  { id: 'nitro',   name: 'Nitro Boost',    desc: 'SHIFT — short burst',   price: 3000, max: 1 },
+  { id: 'paint',   name: 'Gold Paint Job', desc: 'Isla Dorada gold',      price: 900,  max: 1 },
+];
+
+// Sunset palette for the whole game.
 export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
+  skyTop: 0x2a3a6e, skyMid: 0xe8763a, skyLow: 0xffb347,
+  sun: 0xffd27a, fog: 0xe08a4a,
+  road: 0x2e3138, roadLine: 0xf2d060,
+  sand: 0xe8c98a, sea: 0x2a7a9e, grass: 0x4a7a3a,
+  buildingGlass: 0x7ec8e8,
 };
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+// Keyboard mapping.
+export const KEYS = {
+  forward: ['KeyW', 'ArrowUp'],
+  back: ['KeyS', 'ArrowDown'],
+  left: ['KeyA', 'ArrowLeft'],
+  right: ['KeyD', 'ArrowRight'],
+  interact: 'KeyE',
+  handbrake: 'Space',
+  nitro: 'ShiftLeft',
+  map: 'KeyM',
+  garage: 'KeyG',
+  radioNext: 'KeyR',
+  pause: 'Escape',
+  weapon1: 'Digit1', weapon2: 'Digit2', weapon3: 'Digit3', weapon4: 'Digit4',
+};

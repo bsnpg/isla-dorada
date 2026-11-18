@@ -1,79 +1,135 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Screenshot staging behind ?shot=chase|title|combat|map (with &seed=N).
+// Each scene is placed deterministically from the real game state — the same seed
+// always gives the same frame — and the simulation stays frozen afterwards, so the
+// screenshot is exactly the staged frame. The chase shot guarantees police in frame:
+// a roadblock ahead, a unit alongside, and the helicopter overhead.
+import { MISSIONS } from './config.js';
+import { renderHUD, showDialogue } from './hud.js';
+import { renderMinimap } from './minimap.js';
+import { setWanted, spawnPoliceCar, spawnHeli } from './police.js';
+import { spawnTrafficCar, spawnPed } from './traffic.js';
+import { spawnEnemy } from './combat.js';
+import { startMission } from './missions.js';
+import { makeCar } from './driving.js';
+import { drawMap } from './map.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
-
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
+// Place the camera in a chase-cam position behind `pos`, facing `heading`.
+function placeChaseCamera(G, pos, heading, dist, height) {
+  const backX = -Math.sin(heading), backZ = -Math.cos(heading);
+  G.camera.position.set(pos.x + backX * dist, pos.y + height, pos.z + backZ * dist);
+  G.camera.lookAt(pos.x + Math.sin(heading) * 20, pos.y + 2.2, pos.z + Math.cos(heading) * 20);
+  G.camera.fov = 62;
+  G.camera.updateProjectionMatrix();
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
-  }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
+function stageChase(G) {
+  G.setMode('play');
+  const L = G.city.landmarks;
+  void L;
+  // Player in the gold Aurea GT, northbound ON the Beachfront coastal road (x=-280),
+  // beach and sea to the left, city to the right.
+  const car = makeCar(G, 'Aurea GT', -280, 60, Math.PI);
+  G.player.mode = 'car';
+  G.player.pos.set(-280, 0, 60);
+  G.player.heading = Math.PI;
+  G.driving.car = car;
+  G.driving.speed = 38; // ~137 km/h
+  G.player.money = 38420;
+  G.player.health = 100;
+  G.player.armour = 50;
+
+  // IDPD in frame: two units blocking the road ahead, one alongside on the right,
+  // heli overhead in the sky ahead.
+  setWanted(G, 4);
+  const u1 = spawnPoliceCar(G, -280, 30, Math.PI + 0.5);
+  const u2 = spawnPoliceCar(G, -276, 22, Math.PI - 0.4);
+  const u3 = spawnPoliceCar(G, -272, 46, Math.PI);
+  const heli = spawnHeli(G, -280, 20, 24);
+  G.police.units = [
+    { name: 'UNIT 12', dist: 30, status: 'ROADBLOCK', mesh: u1.mesh },
+    { name: 'UNIT 07', dist: 38, status: 'ROADBLOCK', mesh: u2.mesh },
+    { name: 'UNIT 23', dist: 14, status: 'RAMMING', mesh: u3.mesh },
+    { name: 'HAWK-1', dist: 42, status: 'SEARCHLIGHT', mesh: heli.mesh },
+    { name: 'UNIT 31', dist: 210, status: 'PURSUIT', mesh: null },
+  ];
+
+  // Traffic ahead on the same road, pedestrians on the beach sidewalk.
+  spawnTrafficCar(G, -280, -20, Math.PI, 'Palma Cruiser');
+  spawnTrafficCar(G, -280, -70, Math.PI, 'Solano S');
+  spawnTrafficCar(G, -280, 130, 0, 'Marina Taxi');
+  spawnPed(G, -287, 30);
+  spawnPed(G, -287, 10);
+  spawnPed(G, -286, 55);
+
+  // Mission 4, stage 2, timer 2:06 — the long Causeway chase.
+  startMission(G, 3);
+  G.missions.stage = 2;
+  G.missions.stageCount = 3;
+  G.missions.timer = 126;
+  G.missions.objective = 'Deliver the evidence across the Causeway — outrun the IDPD';
+  G.combat.weaponIndex = 1; // SMG in the rack
+  G.audio.radioIndex = 0;
+  showDialogue(G, 'WOWO', 'They will never take me alive. Not on my island.', 60000);
+  placeChaseCamera(G, G.player.pos, Math.PI, 8, 3.5);
+  renderHUD(G);
+  renderMinimap(G);
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
-  }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
-  }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+function stageTitle(G) {
+  G.setMode('title');
+  // Fixed orbit vantage: Casino Row and the beach under the sunset.
+  G.camera.position.set(-180, 90, 260);
+  G.camera.lookAt(-120, 10, -40);
+  G.camera.fov = 58;
+  G.camera.updateProjectionMatrix();
+  G.renderer.render(G.scene, G.camera);
+}
+
+function stageCombat(G) {
+  G.setMode('play');
+  const w = G.city.landmarks.warehouse;
+  G.player.mode = 'foot';
+  G.player.pos.set(w.x - 18, 0, w.z + 24);
+  G.player.heading = Math.atan2(w.x - G.player.pos.x, w.z - G.player.pos.z);
+  G.player.health = 82;
+  G.player.armour = 40;
+  G.player.money = 12500;
+  setWanted(G, 2);
+  G.police.units = [
+    { name: 'UNIT 07', dist: 120, status: 'PURSUIT', mesh: null },
+    { name: 'UNIT 18', dist: 240, status: 'EN ROUTE', mesh: null },
+  ];
+  startMission(G, 4);
+  G.missions.stage = 1;
+  G.missions.stageCount = 3;
+  G.missions.timer = 0;
+  G.combat.weaponIndex = 1;
+  G.combat.weapons[1].ammo = 120;
+  spawnEnemy(G, w.x - 6, w.z + 6, 'gunman');
+  spawnEnemy(G, w.x + 8, w.z - 2, 'gunman');
+  spawnEnemy(G, w.x + 2, w.z + 14, 'heavy');
+  showDialogue(G, 'WOWO', 'Three of them. The cache is behind that wall. Move.', 60000);
+  placeChaseCamera(G, G.player.pos, G.player.heading, 7, 4.5);
+  renderHUD(G);
+  renderMinimap(G);
+}
+
+function stageMap(G) {
+  G.stats.carsStolen = 38;
+  G.stats.escapes = 13;
+  G.stats.playSeconds = 7420;
+  G.stats.missionsDone = 5;
+  G.player.money = 48250;
+  startMission(G, 5);
+  G.setMode('map');
+  drawMap(G);
+}
+
+// Set `G` to the named scene. Any unknown name stages the chase (the cover).
+export function stageShot(name, G) {
+  if (name === 'title') stageTitle(G);
+  else if (name === 'combat') stageCombat(G);
+  else if (name === 'map') stageMap(G);
+  else stageChase(G);
+  void MISSIONS;
 }
