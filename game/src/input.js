@@ -1,4 +1,7 @@
 // Keyboard + mouse input state. Classic WASD driving, mouse aim on foot.
+// Single shared instance: main.js calls Input.init(canvas) once at boot, and
+// every gameplay module reads from it. One-shot keys are consumed with
+// pressed() so a keypress fires exactly once even across fixed-step updates.
 export const Input = {
   keys: new Set(),
   mouseDX: 0,
@@ -6,6 +9,7 @@ export const Input = {
   mouseDown: false,
   mouseClicked: false,
   pointerLocked: false,
+  wheelDelta: 0,
 
   init(canvas) {
     window.addEventListener('keydown', (e) => {
@@ -21,6 +25,7 @@ export const Input = {
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.mouseDown = false;
     });
+    window.addEventListener('wheel', (e) => { this.wheelDelta += e.deltaY; }, { passive: true });
     document.addEventListener('mousemove', (e) => {
       if (this.pointerLocked) {
         this.mouseDX += e.movementX || 0;
@@ -41,11 +46,26 @@ export const Input = {
     return false;
   },
 
+  // True (and consumed) if any of the given codes was pressed this frame.
+  pressedAny(...codes) {
+    for (const c of codes) if (this.pressed(c)) return true;
+    return false;
+  },
+
   // Drop keys from the held set (used when a key both closes an overlay and would
   // otherwise be seen again by the main loop on the next frame — e.g. M closing
   // the map would instantly reopen it).
   clear(...codes) {
     for (const c of codes) this.keys.delete(c);
+  },
+
+  clearAll() {
+    this.keys.clear();
+    this.mouseDown = false;
+    this.mouseClicked = false;
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.wheelDelta = 0;
   },
 
   // Consume the per-frame mouse deltas.
@@ -59,6 +79,14 @@ export const Input = {
     const c = this.mouseClicked;
     this.mouseClicked = false;
     return c;
+  },
+
+  // Consume accumulated wheel scroll (positive = scrolled down). Used for
+  // weapon cycling on foot when the pointer is locked.
+  consumeWheel() {
+    const d = this.wheelDelta;
+    this.wheelDelta = 0;
+    return d;
   },
 
   lockPointer(canvas) {

@@ -1,8 +1,13 @@
 // Isla Dorada — police pursuit (IDPD).
 // Owns G.police: wanted level, pursuit units, roadblocks, helicopter, busted/decay.
+// v2: ramming is REAL CONTACT — a unit steers onto the player car's flank and
+// shoves it sideways (ramCar in driving.js), with sparks, damage and a flip
+// risk at high relative speed. Units have health: ram one hard enough and it
+// wrecks — flips wheels-up, burns, and stays down as scenery.
 import * as THREE from 'three';
 import { POLICE } from './config.js';
 import { clamp, angleLerp } from './random.js';
+import { ramCar, setCarOnFire, spawnFire, spawnSmoke, spawnSparks } from './driving.js';
 
 // Shared materials / geometries — built once, reused by every unit.
 let MAT = null;
@@ -41,6 +46,7 @@ function sharedAssets() {
 function makePoliceCarMesh() {
   const { MAT, GEO } = sharedAssets();
   const mesh = new THREE.Group();
+  mesh.rotation.order = 'YXZ'; // heading (Y) then flip roll (Z), like driving.js
   const body = new THREE.Mesh(GEO.body, MAT.white);
   body.position.y = 0.55;
   body.castShadow = true;
@@ -61,10 +67,9 @@ function makePoliceCarMesh() {
   const lightBlue = new THREE.Mesh(GEO.lightBar, MAT.blue.clone());
   lightBlue.position.set(0.45, 1.36, -0.3);
   mesh.add(lightBlue);
-  const wheelGeo = GEO.wheel;
   const wheelPos = [[-0.95, 0.36, 1.45], [0.95, 0.36, 1.45], [-0.95, 0.36, -1.45], [0.95, 0.36, -1.45]];
   for (const [x, y, z] of wheelPos) {
-    const w = new THREE.Mesh(wheelGeo, MAT.tyre);
+    const w = new THREE.Mesh(GEO.wheel, MAT.tyre);
     w.rotation.z = Math.PI / 2;
     w.position.set(x, y, z);
     mesh.add(w);
@@ -173,11 +178,49 @@ export function spawnPoliceCar(G, x, z, heading) {
     speed: 0,
     heading: heading || 0,
     pos: mesh.position,
+    health: 100,
+    flipped: false,
+    burning: false,
+    wrecked: false,
+    smokeTimer: 0,
     roadblockTimer: 0,
     roadblockTarget: null,
     ramCooldown: 0,
+    ramTarget: null,
   };
   G.police.units.push(unit);
+  return unit;
+}
+
+// Flip a pursuit unit wheels-up: it stops chasing, smokes, and stays down.
+// The unit keeps its HUD row (status WRECKED) until the wanted level drops.
+export function flipPoliceCar(G, unit) {
+  if (!unit || unit.flipped || unit.kind !== 'car') return unit;
+  unit.flipped = true;
+  unit.wrecked = true;
+  unit.speed = 0;
+  unit.status = 'WRECKED';
+  unit.mesh.rotation.z = Math.PI;
+  unit.mesh.position.y = 0.9;
+  const p = unit.pos;
+  spawnSparks(G, p.x, 1, p.z, 18);
+  spawnSmoke(G, p.x, 1.5, p.z, 1.5);
+  if (G.rng() < 0.5) setCarOnFire(G, unit);
+  return unit;
+}
+
+// Staging helper: a police car already flipped wheels-up and smoking.
+export function spawnFlippedPoliceCar(G, x, z, heading) {
+  const unit = spawnPoliceCar(G, x, z, heading || 0);
+  flipPoliceCar(G, unit);
+  return unit;
+}
+
+// Staging helper: a unit already in RAMMING mode, aimed at the player.
+export function spawnRammingPolice(G, x, z, heading) {
+  const unit = spawnPoliceCar(G, x, z, heading || 0);
+  unit.status = 'RAMMING';
+  unit.speed = 30;
   return unit;
 }
 
@@ -232,23 +275,29 @@ export function updatePolice(G, dt) {
   // ---- maintain unit count from wanted -------------------------------------
   const wantCars = wanted; // 1->1 ... 5->5
   const wantHeli = wanted >= 4;
-  let cars = G.police.units.filter((u) => u.kind === 'car' && u.mesh);
-  // Remove surplus cars (furthest first).
+  let cars = G.police.units.filter((u) => u.kind === 'car' && u.mesh && !u.flipped);
+  // Remove surplus cars (furthest first; never remove a wreck — it is scenery).
   while (cars.length > wantCars) {
     let far = cars[0];
     for (const c of cars) if (c.dist > far.dist) far = c;
     removeUnit(G, far);
-    cars = G.police.units.filter((u) => u.kind === 'car' && u.mesh);
+    cars = G.police.units.filter((u) => u.kind === 'car' && u.mesh && !u.flipped);
   }
   while (cars.length < wantCars) {
     const s = spawnPosNearPlayer(G);
     spawnPoliceCar(G, s.x, s.z, Math.atan2(p.x - s.x, p.z - s.z));
-    cars = G.police.units.filter((u) => u.kind === 'car' && u.mesh);
+    cars = G.police.units.filter((u) => u.kind === 'car' && u.mesh && !u.flipped);
   }
   if (wantHeli && !G.police.heli) spawnHeli(G, p.x, p.z, 42);
   if (!wantHeli && G.police.heli) removeUnit(G, G.police.heli);
+  // Wanted dropped to zero: clear the wrecks too.
+  if (wanted === 0) {
+    for (const u of [...G.police.units]) {
+      if (u.kind === 'car' && u.flipped) removeUnit(G, u);
+    }
+  }
 
-  const topSpeed = 30 + wanted * 4; // slightly above the player's top speed at high wanted
+  const topSpeed = POLICE.unitTopSpeed + wanted * 4;
   const pSpeed = playerSpeed(G);
   const pHeading = G.player.mode === 'car' && G.driving.car
     ? G.driving.car.heading : G.player.heading;
@@ -259,7 +308,7 @@ export function updatePolice(G, dt) {
   let anyNear = false;
   let anyBustClose = false;
   for (const u of [...G.police.units]) {
-    if (!u.mesh || !u.pos) continue;
+    if (!u.mesh || !u.pos) continue; // staged HUD-only rows have no mesh/pos
     const dx = p.x - u.pos.x;
     const dz = p.z - u.pos.z;
     const dist = Math.hypot(dx, dz);
@@ -283,6 +332,23 @@ export function updatePolice(G, dt) {
       }
       u.status = 'SEARCHLIGHT';
       u.speed = 0;
+      continue;
+    }
+
+    // Wrecked unit: stays down, smokes, never chases again.
+    if (u.flipped) {
+      u.smokeTimer += dt;
+      if (u.burning) spawnFire(G, u.pos.x, 0.8, u.pos.z, 3);
+      if (u.smokeTimer > 0.5) {
+        u.smokeTimer = 0;
+        spawnSmoke(G, u.pos.x, 1.6, u.pos.z, 1.2);
+      }
+      continue;
+    }
+
+    // A unit rammed to zero health by the player wrecks out.
+    if ((u.health ?? 100) <= 0) {
+      flipPoliceCar(G, u);
       continue;
     }
 
@@ -329,9 +395,15 @@ export function updatePolice(G, dt) {
         u.roadblockTimer = 0;
       }
     } else {
-      // ---- pursuit ---------------------------------------------------------
+      // ---- pursuit: steer at an intercept point ahead of the player --------
+      // so the unit arrives on the player's flank and can make contact.
+      const lead = clamp(pSpeed * 0.35, 0, 12);
+      const tx = p.x + Math.sin(pHeading) * lead;
+      const tz = p.z + Math.cos(pHeading) * lead;
+      const tdx = tx - u.pos.x;
+      const tdz = tz - u.pos.z;
       u.status = dist < 6 ? 'RAMMING' : (dist < 25 ? 'BOXING IN' : 'PURSUIT');
-      const want = Math.atan2(dx, dz);
+      const want = Math.atan2(tdx, tdz);
       u.heading = angleLerp(u.heading, want, Math.min(1, dt * 2.6));
       const targetSpeed = Math.min(topSpeed, playerTopSpeed(G) + 2 + wanted);
       u.speed = Math.min(targetSpeed, u.speed + 12 * dt);
@@ -340,14 +412,26 @@ export function updatePolice(G, dt) {
     }
     u.mesh.rotation.y = u.heading;
 
-    // ---- ram on contact ------------------------------------------------------
+    // ---- ram on contact: REAL push, not a stat tick -------------------------
+    // The unit drives into the player and shoves them sideways; a fast ram
+    // can flip the player car. On foot, Wowo is knocked down instead.
     if (dist < 3.5 && u.ramCooldown <= 0) {
       u.ramCooldown = 1.0;
-      G.player.health = Math.max(0, (G.player.health || 100) - 8);
-      if (G.player.mode === 'car') G.driving.speed *= 0.6;
-      else G.player.speed = (G.player.speed || 0) * 0.6;
+      const nx = dx / (dist || 1), nz = dz / (dist || 1);
+      const relSpeed = Math.abs(u.speed || 0) + pSpeed;
+      if (G.player.mode === 'car' && G.driving.car) {
+        const flipped = ramCar(G, G.driving.car, -nx, -nz, POLICE.ramForce, relSpeed);
+        if (!flipped) G.driving.speed *= 0.6;
+        G.player.health = Math.max(0, (G.player.health || 100) - POLICE.ramDamage);
+      } else {
+        G.player.health = Math.max(0, (G.player.health || 100) - POLICE.ramDamage);
+        // Knock Wowo away from the unit.
+        G.player.pos.x -= nx * 2;
+        G.player.pos.z -= nz * 2;
+      }
       u.speed *= 0.7;
       u.status = 'RAMMING';
+      spawnSparks(G, (p.x + u.pos.x) / 2, 0.9, (p.z + u.pos.z) / 2, 10);
     }
     if (dist < 3) anyBustClose = true;
   }
@@ -355,7 +439,7 @@ export function updatePolice(G, dt) {
   // ---- busted: slow + a unit within 3 m for 3 s ------------------------------
   if (wanted >= 1 && pSpeed < 1 && anyBustClose) {
     G.police.bustTimer += dt;
-    if (G.police.bustTimer >= 3) {
+    if (G.police.bustTimer >= POLICE.bustSeconds) {
       G.police.bustTimer = 0;
       G.setMode('dead');
       return;
@@ -367,7 +451,7 @@ export function updatePolice(G, dt) {
   // ---- wanted decay: every unit > 120 m for 20 s, then -1 per 10 s ----------
   if (wanted > 0 && G.police.units.length > 0 && !anyNear) {
     G.police.decayTimer += dt;
-    if (G.police.decayTimer >= 20) {
+    if (G.police.decayTimer >= POLICE.decayClearSeconds) {
       setWanted(G, wanted - 1);
       G.police.decayTimer = 10; // next step after 10 more seconds clear
     }

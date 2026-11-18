@@ -1,6 +1,7 @@
 // Isla Dorada — Wowo on foot: movement, mouse look, walk swing, car entry.
 // When the player is in a car, driving.js owns movement and this module only
-// keeps the on-foot mesh hidden.
+// keeps the on-foot mesh hidden. Health hitting zero drops Wowo: main.js shows
+// the dead screen (respawn restarts the current job).
 import * as THREE from 'three';
 import { KEYS } from './config.js';
 import { Input } from './input.js';
@@ -52,6 +53,7 @@ function nearestCar(G, pos, maxD) {
   if (G.traffic && G.traffic.cars) lists.push(G.traffic.cars);
   for (const list of lists) {
     for (const car of list) {
+      if (car.flipped || car.burning) continue; // cannot steal a wreck
       const dx = car.mesh.position.x - pos.x;
       const dz = car.mesh.position.z - pos.z;
       const d2 = dx * dx + dz * dz;
@@ -59,6 +61,32 @@ function nearestCar(G, pos, maxD) {
     }
   }
   return best;
+}
+
+// Shared damage path: armour absorbs first, then health. Used by combat and
+// police so a hit in one place behaves the same everywhere.
+export function hurtPlayer(G, amount) {
+  const p = G.player;
+  if (!p || p.health <= 0) return;
+  let left = Math.max(0, amount);
+  if (p.armour > 0) {
+    const absorbed = Math.min(p.armour, left);
+    p.armour -= absorbed;
+    left -= absorbed;
+  }
+  if (left > 0) p.health = Math.max(0, p.health - left);
+}
+
+// Shove the on-foot player away from (x, z) — a car strike or a ram.
+export function knockPlayer(G, x, z, force) {
+  const p = G.player;
+  if (!p || p.mode !== 'foot') return;
+  const dx = p.pos.x - x;
+  const dz = p.pos.z - z;
+  const d = Math.hypot(dx, dz) || 1;
+  p.pos.x += (dx / d) * force;
+  p.pos.z += (dz / d) * force;
+  p.heading = Math.atan2(dx, dz);
 }
 
 export function initPlayer(G) {
@@ -76,12 +104,14 @@ export function initPlayer(G) {
     money: 1250,
     mesh,
     vehicle: null,
+    hurtCooldown: 0,
   };
 }
 
 export function updatePlayer(G, dt) {
   const p = G.player;
   if (!p) return;
+  p.hurtCooldown = Math.max(0, (p.hurtCooldown || 0) - dt);
   if (p.mode === 'car') {
     p.mesh.visible = false;
     return;
@@ -148,6 +178,20 @@ export function updatePlayer(G, dt) {
   u.armL.rotation.x = -swing * 0.8;
   u.armR.rotation.x = swing * 0.8;
 
+  // Traffic strike: a fast car that clips Wowo on foot knocks him down.
+  if (G.traffic && p.hurtCooldown <= 0) {
+    for (const t of G.traffic.cars) {
+      const dx = p.pos.x - t.mesh.position.x;
+      const dz = p.pos.z - t.mesh.position.z;
+      if (dx * dx + dz * dz < 1.7 * 1.7 && Math.abs(t.speed || 0) > 5) {
+        knockPlayer(G, t.mesh.position.x, t.mesh.position.z, 2.5);
+        hurtPlayer(G, 10);
+        p.hurtCooldown = 1;
+        break;
+      }
+    }
+  }
+
   // E near a car: steal it (5 m radius, forgiving for a first-time player).
   if (Input.pressed(KEYS.interact)) {
     const car = nearestCar(G, p.pos, 5);
@@ -156,5 +200,10 @@ export function updatePlayer(G, dt) {
       G.stats.carsStolen++;
       if (G.police) G.setWanted(Math.max(G.police.wanted, 1));
     }
+  }
+
+  // Down: health zero ends the run (main.js shows the dead screen).
+  if (p.health <= 0 && G.mode === 'play') {
+    G.setMode('dead');
   }
 }

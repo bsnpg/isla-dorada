@@ -1,6 +1,19 @@
 // Isla Dorada — save / load via localStorage (key GAME.saveKey).
 // All localStorage access is wrapped in try/catch (private windows).
+// saveSummary() reads the stored save without loading it, so the title
+// screen can show the completion percentage on the CONTINUE button.
 import { GAME, MISSIONS } from './config.js';
+
+function readRaw() {
+  try {
+    const raw = window.localStorage.getItem(GAME.saveKey);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    return (data && typeof data === 'object') ? data : null;
+  } catch (err) {
+    return null;
+  }
+}
 
 export function saveGame(G) {
   try {
@@ -13,6 +26,7 @@ export function saveGame(G) {
         ? { x: G.player.pos.x, z: G.player.pos.z } : { x: 0, z: 0 },
       health: G.player ? G.player.health : 100,
       armour: G.player ? G.player.armour : 0,
+      savedAt: Date.now(),
     };
     window.localStorage.setItem(GAME.saveKey, JSON.stringify(data));
     return true;
@@ -22,15 +36,8 @@ export function saveGame(G) {
 }
 
 export function loadGame(G) {
-  let data = null;
-  try {
-    const raw = window.localStorage.getItem(GAME.saveKey);
-    if (!raw) return false;
-    data = JSON.parse(raw);
-  } catch (err) {
-    return false;
-  }
-  if (!data || typeof data !== 'object') return false;
+  const data = readRaw();
+  if (!data) return false;
 
   if (typeof data.money === 'number' && G.player) G.player.money = data.money;
   if (typeof data.health === 'number' && G.player) G.player.health = data.health;
@@ -60,11 +67,25 @@ export function loadGame(G) {
 }
 
 export function hasSave() {
-  try {
-    return window.localStorage.getItem(GAME.saveKey) !== null;
-  } catch (err) {
-    return false;
-  }
+  return readRaw() !== null;
+}
+
+// Completion summary of the stored save (no load, no side effects).
+export function saveSummary() {
+  const data = readRaw();
+  if (!data) return null;
+  const done = (data.stats && typeof data.stats.missionsDone === 'number')
+    ? data.stats.missionsDone : 0;
+  return {
+    missionIndex: (typeof data.missionIndex === 'number') ? data.missionIndex : 0,
+    money: (typeof data.money === 'number') ? data.money : 0,
+    missionsDone: done,
+    percent: Math.round((done / MISSIONS.length) * 100),
+    playSeconds: (data.stats && typeof data.stats.playSeconds === 'number')
+      ? data.stats.playSeconds : 0,
+    carsStolen: (data.stats && typeof data.stats.carsStolen === 'number')
+      ? data.stats.carsStolen : 0,
+  };
 }
 
 export function clearSave() {

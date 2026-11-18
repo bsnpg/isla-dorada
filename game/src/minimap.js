@@ -1,6 +1,8 @@
-// Isla Dorada — minimap: 180x180 canvas, north up, world 640m -> 180px.
-// Redrawn every frame from live G state. Defensive about G.city.roads —
-// city.js is written in parallel, so any road shape (or none) is handled.
+// Isla Dorada — minimap (rebuild): 180x180 canvas, north up, world 640m ->
+// 180px. Redrawn every frame from live G state. Defensive about
+// G.city.roads — any road shape (or none) is handled. Rebuild adds a north
+// tick, a pulsing wanted ring while the IDPD is after the player, and
+// brighter police blips so pursuit reads instantly.
 import { DISTRICTS, WORLD } from './config.js';
 
 let canvas = null;
@@ -21,12 +23,14 @@ function posOf(o) {
   return null;
 }
 
+// The roads array for this frame (set by renderMinimap before drawing).
+let currentRoads = null;
+
 function drawRoads(c) {
   c.strokeStyle = '#4a4f5c';
   c.lineCap = 'round';
   const roadW = Math.max(2.5, WORLD.roadWidth * SCALE);
   c.lineWidth = roadW;
-  // Roads come from G (passed via the module-level currentRoads below).
   const rs = currentRoads;
   let drew = false;
   if (Array.isArray(rs) && rs.length) {
@@ -68,9 +72,6 @@ function drawRoads(c) {
   }
 }
 
-// The roads array for this frame (set by renderMinimap before drawing).
-let currentRoads = null;
-
 function drawDiamond(c, x, y, r, color) {
   c.fillStyle = color;
   c.beginPath();
@@ -92,6 +93,7 @@ export function renderMinimap(G) {
   if (!ctx || !canvas || !G.player || !G.player.pos) return;
   const c = ctx;
   currentRoads = (G.city && G.city.roads) || null;
+  const wanted = (G.police && typeof G.police.wanted === 'number') ? G.police.wanted : 0;
 
   // Background: island.
   c.clearRect(0, 0, SIZE, SIZE);
@@ -130,16 +132,19 @@ export function renderMinimap(G) {
     }
   }
 
-  // Police blips (red cars, blue heli).
+  // Police blips (red cars, blue heli) with a white rim so they read on roads.
   if (G.police && Array.isArray(G.police.units)) {
     for (const u of G.police.units) {
       const q = posOf(u.mesh) || posOf(u.pos) || posOf(u);
       if (!q) continue;
       const isHeli = u.kind === 'heli' || (u.name && /HAWK|HELI/i.test(u.name));
       c.fillStyle = isHeli ? '#4fb3d9' : '#e5484d';
+      c.strokeStyle = 'rgba(255,255,255,0.85)';
+      c.lineWidth = 1;
       c.beginPath();
       c.arc(toPx(q.x), toPx(q.z), 3, 0, Math.PI * 2);
       c.fill();
+      c.stroke();
     }
   }
 
@@ -163,6 +168,22 @@ export function renderMinimap(G) {
   c.fill();
   c.stroke();
   c.restore();
+
+  // Wanted ring: pulsing red circle around the player while the IDPD hunts.
+  if (wanted > 0) {
+    const pulse = 0.45 + 0.35 * Math.sin((G.time || 0) * 5);
+    c.strokeStyle = `rgba(229,72,77,${pulse.toFixed(2)})`;
+    c.lineWidth = 2;
+    c.beginPath();
+    c.arc(px, py, 11 + 2 * Math.sin((G.time || 0) * 5), 0, Math.PI * 2);
+    c.stroke();
+  }
+
+  // North tick.
+  c.fillStyle = 'rgba(245,239,224,0.9)';
+  c.font = '800 9px system-ui, sans-serif';
+  c.textAlign = 'center';
+  c.fillText('N', SIZE / 2, 10);
 
   currentRoads = null;
 }

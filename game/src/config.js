@@ -1,9 +1,9 @@
-// Isla Dorada — game configuration and data.
+// Isla Dorada — game configuration and data. (REBUILD v2)
 // All names, places, vehicles, missions and radio stations are original.
 export const GAME = {
   title: 'Isla Dorada: 8 Jobs to Clear His Name',
   shortTitle: 'ISLA DORADA',
-  version: '1.0.0',
+  version: '2.0.0',
   saveKey: 'isla-dorada-save-v1',
 };
 
@@ -104,16 +104,44 @@ export const POLICE = {
   heliName: 'IDPD Hawk',
   // Named response units shown in the HUD police list.
   unitNames: ['UNIT 12', 'UNIT 07', 'UNIT 23', 'UNIT 31', 'HAWK-1', 'UNIT 18'],
-  statuses: ['PURSUIT', 'RAMMING', 'ROADBLOCK', 'BOXING IN', 'SEARCHLIGHT', 'EN ROUTE'],
+  statuses: ['PURSUIT', 'RAMMING', 'ROADBLOCK', 'BOXING IN', 'SEARCHLIGHT', 'EN ROUTE', 'WRECKED'],
+  ramDamage: 8,      // health lost when a unit rams the player
+  ramForce: 14,      // lateral shove (m/s) applied to the player car on a ram
+  ramFlipSpeed: 20,  // relative speed above which a ram can flip the player car
+  unitTopSpeed: 34,  // base pursuit top speed; +4 per wanted star
+  bustSeconds: 3,    // slow + a unit within 3 m for this long = BUSTED
+  decayClearSeconds: 20, // all units > 120 m for this long starts wanted decay
 };
 
-// Weapon rack slots 1-4.
+// Weapon rack slots 1-4. `flash` scales the muzzle-flash sprite; `tracer` is
+// the tracer-line colour for that weapon.
 export const WEAPONS = [
-  { name: 'Pistol',  damage: 34, rate: 0.32, ammo: 48,  range: 60 },
-  { name: 'SMG',     damage: 18, rate: 0.09, ammo: 120, range: 45 },
-  { name: 'Shotgun', damage: 70, rate: 0.9,  ammo: 24,  range: 25 },
-  { name: 'Rifle',   damage: 55, rate: 0.14, ammo: 90,  range: 90 },
+  { name: 'Pistol',  damage: 34, rate: 0.32, ammo: 48,  range: 60, flash: 0.9, tracer: 0xffe08a },
+  { name: 'SMG',     damage: 18, rate: 0.09, ammo: 120, range: 45, flash: 0.7, tracer: 0xffd76a },
+  { name: 'Shotgun', damage: 70, rate: 0.9,  ammo: 24,  range: 25, flash: 1.5, tracer: 0xffb347 },
+  { name: 'Rifle',   damage: 55, rate: 0.14, ammo: 90,  range: 90, flash: 1.1, tracer: 0xfff2b0 },
 ];
+
+// Arcade score popups: drift chains and near misses pay cash and are exposed
+// on G.driving.score so the HUD can render them.
+export const SCORE = {
+  driftBase: 50,        // $ per drift chain step
+  driftChainTime: 1.5,  // seconds of drifting per +1 chain (max 5)
+  driftMinTime: 0.6,    // drift must last this long to pay out
+  nearMiss: 250,        // $ per near miss
+  nearMissCooldown: 2.5,
+  nearMissMinSpeed: 20, // player must be going this fast (m/s)
+  nearMissRange: 4.5,   // lateral gap that still counts as a near miss
+};
+
+// Crash / flip tuning (speeds in m/s).
+export const CHAOS = {
+  flipSpeed: 18,        // hard wall hit above this + handbrake can flip a car
+  flipHardSpeed: 22,    // any impact above this flips the car outright
+  flipChance: 0.5,      // coin flip on a borderline flip-speed impact
+  burnDrain: 4,         // health per second lost by a burning car
+  wreckSmokeTime: 30,   // seconds a wreck keeps smoking
+};
 
 // Procedural radio stations (WebAudio, no audio files).
 export const RADIO = [

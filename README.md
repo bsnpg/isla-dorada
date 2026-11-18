@@ -47,16 +47,16 @@ No install, no build step, no network: `serve.ts` (Node 22, standard library onl
 
 ## Systems shipped
 
-- **Open world**: a 640 × 640 m island with 7 named districts (Beachfront, Casino Row, Old Town, Marina, Palm Heights, Harbor, Causeway), sunset lighting, beach and sea.
-- **Driving**: 6 original vehicles (Aurea GT, Solano S, Palma Cruiser, Faro Pickup, Cayo Coupe, Marina Taxi), chase camera with speed FOV, ambient traffic cars and pedestrians.
-- **Police**: wanted level 0–5 stars, named IDPD response units (UNIT 12, UNIT 07, UNIT 23, UNIT 31, HAWK-1, UNIT 18) with live statuses — PURSUIT, RAMMING, ROADBLOCK, BOXING IN, SEARCHLIGHT — plus the IDPD Hawk helicopter.
-- **On-foot combat**: 4-weapon rack with ammo, reload, enemy AI that closes in and shoots back, tracers.
+- **Open world**: a 640 × 640 m island with 7 named districts (Beachfront, Casino Row, Old Town, Marina, Palm Heights, Harbor, Causeway), a visible low sun with glow and lens flare, a ferris wheel, a boardwalk, neon billboards, ~300 buildings, beach and sea.
+- **Driving**: 6 original vehicles (Aurea GT, Solano S, Palma Cruiser, Faro Pickup, Cayo Coupe, Marina Taxi), chase camera with speed FOV, ambient traffic cars and pedestrians, drift and near-miss scoring (DRIFT x3, NEAR MISS +$250), and crash physics — hard hits spark, smoke, and can flip a car wheels-up or set it burning.
+- **Police**: wanted level 0–5 stars, named IDPD response units (UNIT 12, UNIT 07, UNIT 23, UNIT 31, HAWK-1, UNIT 18) with live statuses — PURSUIT, RAMMING, ROADBLOCK, BOXING IN, SEARCHLIGHT, WRECKED — plus the IDPD Hawk helicopter. Units ram with real contact and can be flipped and wrecked.
+- **On-foot combat**: 4-weapon rack with ammo, reload, enemy AI that closes in and shoots back, muzzle flashes, tracer lines, floating damage numbers, downed enemies that stay down, and burning cars.
 - **Missions**: 8 staged story jobs with briefings, objectives and escalating wanted levels, with Wowo's dialogue.
-- **HUD**: mission panel with timer and next step, wanted stars, money, clock, police response list, round minimap with district name, health and armour, weapon rack, speed and vehicle name, radio readout.
+- **HUD**: mission panel with timer and next step, wanted stars, money, clock, police response list, round minimap with district name, health and armour, weapon rack, a speedometer gauge with nitro lamp, drawn character portraits in the dialogue, and drift / near-miss score popups.
 - **Garage**: upgrades with prices — Turbo Engine, Armored Plating, Sport Brakes, Nitro Boost, Gold Paint Job.
 - **Radio**: 3 procedural WebAudio stations (RADIO SOL 92.5, DORADA FM 101.3, PALMA 77.7), engine hum and police sirens — no audio files.
 - **Save**: progress (mission, money, upgrades, stats, position, health, armour) saves to a local slot; the title screen offers CONTINUE — SAVE SLOT 1.
-- **Title screen, full city map screen, and 4 staged screenshots** (`screenshots/`: chase, title, combat, map).
+- **Title screen, full city map screen, and 4 staged screenshots** (`screenshots/`: chase, title, combat, map). The title shows the sun and skyline, drawn character portraits, and a HOW TO PLAY controls panel.
 
 ---
 

@@ -1,7 +1,10 @@
-// Isla Dorada — procedural WebAudio: radio step sequencer, engine hum,
-// siren loop and one-shot SFX. Everything is synthesized (no audio files).
-// The AudioContext is created lazily on the first user gesture; every public
-// function guards the ctx === null case (before the first gesture).
+// Isla Dorada — procedural WebAudio (rebuild): radio step sequencer, engine
+// hum, siren loop and one-shot SFX. Everything is synthesized (no audio
+// files, no network). The AudioContext is created lazily on the first user
+// gesture; every public function guards the ctx === null case (before the
+// first gesture). Rebuild adds skid / near-miss / mission / busted SFX, a
+// mute toggle (M is taken by the map, so mute lives on the 0 key via
+// toggleMute), and a radioLabel() helper for the HUD.
 import { RADIO, KEYS } from './config.js';
 import { Input } from './input.js';
 
@@ -22,7 +25,7 @@ function ensureAudio(G) {
     if (!AC) return;
     a.ctx = new AC();
     a.master = a.ctx.createGain();
-    a.master.gain.value = 0.5;
+    a.master.gain.value = a.muted ? 0 : 0.5;
     a.master.connect(a.ctx.destination);
     // Shared noise buffer for hats / snare / bursts.
     const len = a.ctx.sampleRate * 1;
@@ -154,6 +157,7 @@ export function initAudio(G) {
     sirenGain: null,
     step: 0,
     nextNoteTime: 0,
+    muted: false,
   };
   const gesture = () => {
     ensureAudio(G);
@@ -170,6 +174,23 @@ export function setRadio(G, i) {
   a.radioIndex = ((i % n) + n) % n;
   a.step = 0;
   if (a.ctx) a.nextNoteTime = a.ctx.currentTime + 0.05;
+}
+
+export function radioLabel(G) {
+  const a = G.audio;
+  const ri = (a && typeof a.radioIndex === 'number') ? a.radioIndex : 0;
+  const station = RADIO[ri] || RADIO[0];
+  return `${station.name} — ${station.genre}`;
+}
+
+export function toggleMute(G) {
+  const a = G.audio;
+  if (!a) return false;
+  a.muted = !a.muted;
+  if (a.ctx && a.master) {
+    a.master.gain.setTargetAtTime(a.muted ? 0 : 0.5, a.ctx.currentTime, 0.02);
+  }
+  return a.muted;
 }
 
 export function updateAudio(G) {
@@ -224,6 +245,7 @@ export function playSFX(G, name) {
       tone(a, 1320, 0.14, 'sine', 0.18, a.ctx.currentTime + 0.09);
       break;
     case 'complete':
+    case 'mission':
       [523, 659, 784, 1046].forEach((f, i) => {
         tone(a, f, 0.16, 'sine', 0.16, a.ctx.currentTime + i * 0.09);
       });
@@ -231,6 +253,25 @@ export function playSFX(G, name) {
     case 'crash':
       noise(a, 0.25, 0.3, 400);
       tone(a, 60, 0.3, 'sine', 0.3, a.ctx.currentTime, 40);
+      break;
+    case 'skid':
+      // Tyre squeal: high band-passed noise sliding down.
+      noise(a, 0.35, 0.14, 2600);
+      tone(a, 900, 0.3, 'sawtooth', 0.05, a.ctx.currentTime, 420);
+      break;
+    case 'nearMiss':
+      // Bright two-note chime for a near miss / drift bonus.
+      tone(a, 1174, 0.08, 'sine', 0.16);
+      tone(a, 1568, 0.16, 'sine', 0.16, a.ctx.currentTime + 0.07);
+      break;
+    case 'pickup':
+      tone(a, 660, 0.07, 'square', 0.12);
+      tone(a, 990, 0.12, 'square', 0.12, a.ctx.currentTime + 0.06);
+      break;
+    case 'busted':
+      // Descending two-tone: the IDPD got you.
+      tone(a, 392, 0.25, 'sawtooth', 0.14, a.ctx.currentTime, 311);
+      tone(a, 311, 0.4, 'sawtooth', 0.14, a.ctx.currentTime + 0.25, 233);
       break;
     default:
       break;

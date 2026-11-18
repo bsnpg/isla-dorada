@@ -3,10 +3,11 @@
 // ?seed=N fixes the world. ?shot=chase|title|combat|map (with &seed=N) stages that scene,
 // paints it twice and sets window.__shotReady for a screenshot — the simulation stays frozen.
 import * as THREE from 'three';
-import { GAME, KEYS, MISSIONS, PALETTE, WORLD } from './config.js';
+import { GAME, KEYS, MISSIONS } from './config.js';
 import { Input } from './input.js';
 import { mulberry32 } from './random.js';
-import { buildCity } from './city.js';
+import { buildCity, updateCity } from './city.js';
+import { buildSky, buildLights, updateSky } from './sky.js';
 import { initTraffic, updateTraffic } from './traffic.js';
 import { initPlayer, updatePlayer } from './player.js';
 import { initDriving, updateDriving, enterCar, exitCar } from './driving.js';
@@ -107,46 +108,8 @@ function buildRenderer() {
   return renderer;
 }
 
-function buildSky(scene) {
-  // Sunset gradient dome + low sun disc, all procedural (no textures, no network).
-  const geo = new THREE.SphereGeometry(900, 24, 16);
-  const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    uniforms: {
-      top: { value: new THREE.Color(PALETTE.skyTop) },
-      mid: { value: new THREE.Color(PALETTE.skyMid) },
-      low: { value: new THREE.Color(PALETTE.skyLow) },
-    },
-    vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: `varying vec3 vP; uniform vec3 top; uniform vec3 mid; uniform vec3 low;
-      void main(){ float h = normalize(vP).y; vec3 c = h > 0.25 ? mix(mid, top, smoothstep(0.25, 0.9, h)) : mix(low, mid, smoothstep(-0.05, 0.25, h)); gl_FragColor = vec4(c, 1.0); }`,
-  });
-  const dome = new THREE.Mesh(geo, mat);
-  scene.add(dome);
-  const sun = new THREE.Mesh(
-    new THREE.CircleGeometry(46, 32),
-    new THREE.MeshBasicMaterial({ color: PALETTE.sun, fog: false }),
-  );
-  sun.position.set(-820, 120, -260);
-  sun.lookAt(0, 60, 0);
-  scene.add(sun);
-  scene.fog = new THREE.Fog(PALETTE.fog, 220, 900);
-}
-
-function buildLights(scene) {
-  const hemi = new THREE.HemisphereLight(0xffc890, 0x4a3a5a, 0.85);
-  scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffb36b, 2.2);
-  sun.position.set(-260, 190, -120);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -360; sun.shadow.camera.right = 360;
-  sun.shadow.camera.top = 360; sun.shadow.camera.bottom = -360;
-  sun.shadow.camera.far = 900;
-  scene.add(sun);
-  scene.add(sun.target);
-}
+// Sky + lights live in sky.js (rebuild v2): a 4-stop gradient dome, a big low
+// sun with glow halo + lens flare, drifting clouds, warm directional light.
 
 // ---------------------------------------------------------------- chase camera
 const camTarget = new THREE.Vector3();
@@ -180,8 +143,8 @@ function boot() {
   G.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2000);
   G.camera.position.set(-40, 26, 60);
   G.renderer = buildRenderer();
-  buildSky(G.scene);
-  buildLights(G.scene);
+  buildSky(G);
+  buildLights(G);
 
   buildCity(G);
   initTraffic(G);
@@ -216,6 +179,8 @@ function stepPlay(dt) {
   updatePlayer(G, dt);
   updateDriving(G, dt);
   updateTraffic(G, dt);
+  updateSky(G, dt);
+  updateCity(G, dt);
   updatePolice(G, dt);
   updateMissions(G, dt);
   updateCombat(G, dt);

@@ -1,8 +1,10 @@
-// Isla Dorada — full city map screen (#map-canvas 640x640): sea, island,
-// district washes + labels, roads, landmark markers, player arrow and the
-// mission marker. Also refreshes the job checklist and run stats from live G.
-// drawMap reads live values every call (no caching) — shots.js calls it
-// directly after staging stats.
+// Isla Dorada — full city map screen (rebuild, #map-canvas 640x640): sea,
+// island, district washes + labels, roads, landmark markers, player arrow
+// and the mission marker. Also refreshes the job checklist and run stats
+// from live G. drawMap reads live values every call (no caching) — shots.js
+// calls it directly after staging stats. Rebuild: brighter island fill so
+// the map reads at a glance, a compass rose, and stats that also show the
+// wanted level and cash alongside the measured run numbers.
 import { DISTRICTS, MISSIONS, WORLD, KEYS } from './config.js';
 import { Input } from './input.js';
 
@@ -28,7 +30,7 @@ function posOf(o) {
 }
 
 function drawRoads(c) {
-  c.strokeStyle = '#4a4f5c';
+  c.strokeStyle = '#565d6e';
   c.lineCap = 'round';
   const roadW = Math.max(3, WORLD.roadWidth * SCALE);
   c.lineWidth = roadW;
@@ -100,7 +102,8 @@ function refreshChecklist(G) {
   const done = (G.stats && typeof G.stats.missionsDone === 'number') ? G.stats.missionsDone : 0;
   checklistEl.innerHTML = MISSIONS.map((m, i) => {
     const cls = (i < idx || i < done) ? 'done' : (i === idx ? 'current' : '');
-    return `<li class="${cls}">JOB ${i + 1} — ${m.name}</li>`;
+    const mark = (i < idx || i < done) ? '✓ ' : (i === idx ? '▶ ' : '· ');
+    return `<li class="${cls}">${mark}JOB ${i + 1} — ${m.name}</li>`;
   }).join('');
 }
 
@@ -108,13 +111,19 @@ function refreshStats(G) {
   if (!statsEl) return;
   const s = G.stats || {};
   const totalSec = Math.floor(s.playSeconds || 0);
-  const mm = String(Math.floor(totalSec / 60)).padStart(2, '0');
+  const hh = String(Math.floor(totalSec / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
   const ss = String(totalSec % 60).padStart(2, '0');
   const pct = Math.round(((s.missionsDone || 0) / MISSIONS.length) * 100);
+  const wanted = (G.police && typeof G.police.wanted === 'number') ? G.police.wanted : 0;
+  const money = G.player ? Math.floor(G.player.money || 0).toLocaleString('en-US') : '0';
+  const hours = totalSec >= 3600 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
   statsEl.innerHTML =
     `Cars stolen <b>${s.carsStolen || 0}</b><br>` +
     `IDPD escapes <b>${s.escapes || 0}</b><br>` +
-    `Play time <b>${mm}:${ss}</b><br>` +
+    `Jobs done <b>${s.missionsDone || 0} / ${MISSIONS.length}</b><br>` +
+    `Play time <b>${hours}</b><br>` +
+    `Cash <b>$${money}</b> &nbsp;·&nbsp; Wanted <b>${'★'.repeat(wanted)}${'☆'.repeat(5 - wanted)}</b><br>` +
     `SAVE SLOT 1 — <b>${pct}% COMPLETE</b>`;
 }
 
@@ -143,9 +152,9 @@ export function drawMap(G) {
   const c = ctx;
   currentRoads = (G.city && G.city.roads) || null;
 
-  // Island background.
+  // Island background (brighter than the minimap so the full map reads).
   c.clearRect(0, 0, SIZE, SIZE);
-  c.fillStyle = '#1c2233';
+  c.fillStyle = '#232c42';
   c.fillRect(0, 0, SIZE, SIZE);
 
   // Sea (west strip) + beach.
@@ -156,7 +165,7 @@ export function drawMap(G) {
 
   // District washes + labels.
   for (const d of DISTRICTS) {
-    c.globalAlpha = 0.12;
+    c.globalAlpha = 0.14;
     c.fillStyle = d.color;
     c.fillRect(toPx(d.minX), toPx(d.minZ), (d.maxX - d.minX) * SCALE, (d.maxZ - d.minZ) * SCALE);
   }
@@ -169,7 +178,7 @@ export function drawMap(G) {
   // Drawn after the roads so road strokes never cross the text.
   c.font = '600 11px system-ui, sans-serif';
   c.textAlign = 'left';
-  c.fillStyle = 'rgba(245,239,224,0.45)';
+  c.fillStyle = 'rgba(245,239,224,0.55)';
   for (const d of DISTRICTS) {
     c.fillText(d.name.toUpperCase(), toPx(d.minX) + 8, toPx(d.minZ) + 16);
   }
@@ -225,6 +234,24 @@ export function drawMap(G) {
     c.stroke();
     c.restore();
   }
+
+  // Compass rose, top-right corner.
+  c.fillStyle = '#f2c230';
+  c.font = '800 14px system-ui, sans-serif';
+  c.textAlign = 'center';
+  c.fillText('N', SIZE - 22, 24);
+  c.strokeStyle = '#f2c230';
+  c.lineWidth = 2;
+  c.beginPath();
+  c.moveTo(SIZE - 22, 30);
+  c.lineTo(SIZE - 22, 44);
+  c.stroke();
+  c.beginPath();
+  c.moveTo(SIZE - 22, 28);
+  c.lineTo(SIZE - 27, 38);
+  c.lineTo(SIZE - 17, 38);
+  c.closePath();
+  c.fill();
 
   currentRoads = null;
   refreshChecklist(G);

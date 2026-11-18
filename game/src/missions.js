@@ -1,9 +1,11 @@
 // Isla Dorada — the 8 staged story jobs ("Bersihkan Nama" arc).
 // Data-driven stages: reach a point, clear a combat stage, or lose a tail.
 // The objective beacon is a glowing gold cylinder + point light at the target.
+// Job 4 is the timed Causeway chase (150 s); Job 8 runs at wanted 5.
+// Rewards scale per job and the game auto-saves on every completion.
 import * as THREE from 'three';
 import { MISSIONS } from './config.js';
-import { spawnEnemy } from './combat.js';
+import { spawnBurningCar, spawnEnemy } from './combat.js';
 
 // Landmark coordinates (match city.js landmarks).
 const CASINO = { x: -120, z: -200 };
@@ -45,9 +47,10 @@ const STAGES = [
     { type: 'reach', x: CASINO.x, z: CASINO.z, r: 15 },
   ],
   // Job 5 — Gudang Senjata: warehouse, clear the crew, reach the garage.
+  // A burning car is already waiting in the warehouse yard when the fight starts.
   [
     { type: 'reach', x: WAREHOUSE.x, z: WAREHOUSE.z, r: 15 },
-    { type: 'combat', x: WAREHOUSE.x, z: WAREHOUSE.z, r: 15, enemies: ['gunman', 'gunman', 'gunman'] },
+    { type: 'combat', x: WAREHOUSE.x, z: WAREHOUSE.z, r: 15, enemies: ['gunman', 'gunman', 'gunman'], burningCar: true },
     { type: 'reach', x: GARAGE.x, z: GARAGE.z, r: 12 },
   ],
   // Job 6 — Konfrontasi: marina, fight Braga's men, reach the station.
@@ -79,6 +82,19 @@ const STAGE_OBJECTIVES = [
   ['Reach the Marina — face Officer Braga', 'Deal with Braga\u2019s men', 'Get the confession to the IDPD station'],
   ['Reach the IDPD station', 'Take the recording — clear the guards', 'Deliver the recording to Old Town'],
   ['Reach the Causeway — five stars, one road out', 'Push east — do not stop', 'Freedom — cross the line'],
+];
+
+// One-line toast shown when each stage starts, so the player always knows
+// what changed without opening the map.
+const STAGE_BRIEFINGS = [
+  ['Boss is waiting at the Marina', 'Boss aboard — Casino Dorada, fast', 'Drop him at the casino'],
+  ['The witness is at the Marina', 'IDPD tail on you — break line of sight', 'She is safe — take her to Old Town'],
+  ['Impound lot, Old Town', 'Guards between you and the evidence', 'Evidence in hand — casino, now'],
+  ['Causeway east — full speed', 'Harbor cut-through, keep moving', 'Final stretch to the casino'],
+  ['Warehouse, Harbor district', 'The crew will not hand it over', 'Cache secured — garage, go'],
+  ['Braga is at the Marina', 'His men first, then him', 'Confession in pocket — IDPD station'],
+  ['IDPD station, Palm Heights', 'Guards on the recording room', 'Recording secured — Old Town'],
+  ['Five stars. One road out.', 'Do not stop for anything', 'FREEDOM — cross the line'],
 ];
 
 const QUIPS = [
@@ -140,8 +156,10 @@ function applyStage(G) {
   if (!def) return;
   m.objective = (STAGE_OBJECTIVES[m.index] && STAGE_OBJECTIVES[m.index][m.stage - 1])
     || MISSIONS[m.index].objective;
+  const brief = STAGE_BRIEFINGS[m.index] && STAGE_BRIEFINGS[m.index][m.stage - 1];
+  if (brief) G.flashToast(brief);
+  makeBeacon(G, def.x, def.z);
   if (def.type === 'combat') {
-    makeBeacon(G, def.x, def.z);
     // Spawn the stage's enemies once, at the fight location.
     const spots = [
       { x: def.x - 6, z: def.z + 6 },
@@ -153,8 +171,9 @@ function applyStage(G) {
       const s = spots[k % spots.length];
       spawnEnemy(G, s.x, s.z, kind);
     });
-  } else {
-    makeBeacon(G, def.x, def.z);
+    if (def.burningCar) {
+      spawnBurningCar(G, def.x + 14, def.z + 10, Math.PI / 3, 'Faro Pickup');
+    }
   }
 }
 
