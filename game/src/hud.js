@@ -90,6 +90,37 @@ export function portraitSVG(speaker) {
     + `</svg>`;
 }
 
+// ---------------------------------------------------------------- weapon art
+// Flat, drawn SVG weapon silhouettes — original geometric art, no images.
+// Each is a 64x28 viewBox gun profile in gold; readable at ~60 px wide.
+// Used by the GTA-style top-right weapon panel (current weapon + ammo).
+function weaponSVG(name) {
+  const n = String(name || '').toUpperCase();
+  const gold = '#f2c230';
+  let body = '';
+  if (n.includes('PISTOL')) {
+    body = `<rect x="10" y="9" width="34" height="6" rx="1" fill="${gold}"/>`
+      + `<rect x="30" y="14" width="9" height="12" rx="1" fill="${gold}"/>`
+      + `<rect x="42" y="10" width="4" height="4" fill="${gold}"/>`;
+  } else if (n.includes('SMG')) {
+    body = `<rect x="6" y="10" width="48" height="6" rx="1" fill="${gold}"/>`
+      + `<rect x="26" y="15" width="8" height="11" rx="1" fill="${gold}"/>`
+      + `<rect x="6" y="12" width="8" height="5" fill="${gold}"/>`
+      + `<rect x="52" y="11" width="6" height="4" fill="${gold}"/>`;
+  } else if (n.includes('SHOTGUN')) {
+    body = `<rect x="4" y="10" width="56" height="4" rx="1" fill="${gold}"/>`
+      + `<rect x="30" y="14" width="14" height="4" fill="${gold}"/>`
+      + `<rect x="4" y="13" width="12" height="7" rx="1" fill="${gold}"/>`
+      + `<rect x="14" y="14" width="8" height="4" fill="${gold}"/>`;
+  } else { // Rifle
+    body = `<rect x="4" y="10" width="56" height="4" rx="1" fill="${gold}"/>`
+      + `<rect x="30" y="5" width="14" height="5" rx="1" fill="${gold}"/>`
+      + `<rect x="26" y="14" width="8" height="11" rx="1" fill="${gold}"/>`
+      + `<rect x="4" y="12" width="10" height="7" rx="1" fill="${gold}"/>`;
+  }
+  return `<svg viewBox="0 0 64 28" width="64" height="28" aria-hidden="true">${body}</svg>`;
+}
+
 // ---------------------------------------------------------------- formatting
 function $(id) {
   return document.getElementById(id);
@@ -149,7 +180,22 @@ function injectHudStyle() {
 #nitro-lamp { font: 800 12px ui-monospace, Menlo, monospace; letter-spacing: 2px; color: rgba(245,239,224,.25); margin-top: 2px; }
 #nitro-lamp.on { color: #ff9a3c; text-shadow: 0 0 10px rgba(255,154,60,.9); }
 #dialogue-portrait svg { display: block; border-radius: 50%; }
-.char .face svg { display: block; border-radius: 50%; }`;
+.char .face svg { display: block; border-radius: 50%; }
+/* GTA-style radio badge (in-car notification, top-left under the mission
+   panel) + top-right weapon panel (current weapon + ammo, GTA layout). */
+#radio { display: none; }
+#radio-badge { position: absolute; left: 12px; top: 178px; background: var(--panel); border: 1px solid rgba(242,194,48,.55); border-radius: 6px; padding: 7px 12px; min-width: 230px; }
+#radio-badge .rb-name { font: 800 15px var(--font-ui); color: var(--gold); letter-spacing: 1px; }
+#radio-badge .rb-sub { font: 600 11px var(--font-read); color: var(--muted); margin-top: 2px; }
+#radio-badge .rb-hint { font: 600 9px var(--font-read); color: rgba(245,239,224,.45); letter-spacing: 1px; margin-top: 3px; }
+#weapon-panel { display: flex; gap: 8px; align-items: center; justify-content: flex-end; background: var(--panel); border: 1px solid rgba(242,194,48,.55); border-radius: 6px; padding: 6px 10px; margin-top: 8px; }
+#weapon-panel .wp-name { font: 800 14px var(--font-ui); color: var(--gold); letter-spacing: 1px; text-align: right; }
+#weapon-panel .wp-ammo { font: 800 20px var(--font-read); color: var(--ink); text-align: right; line-height: 1.1; }
+#weapon-panel .wp-ammo small { font-size: 10px; color: var(--muted); }
+#weapon-panel .wp-hint { font: 600 9px var(--font-read); color: rgba(245,239,224,.45); letter-spacing: 1px; text-align: right; margin-top: 2px; }
+#weapon-panel .wp-sil svg { display: block; }
+.wslot.active { border-color: var(--gold); border-width: 2px; color: var(--gold); background: rgba(242,194,48,.16); }
+.wslot.active .ammo { color: var(--gold); font-weight: 700; }`;
   document.head.appendChild(st);
 }
 
@@ -354,6 +400,32 @@ export function initHUD(G) {
   gaugeCtx = gaugeEl ? gaugeEl.getContext('2d') : null;
   el.nitroLamp = $('nitro-lamp');
 
+  // GTA-style top-right weapon panel (current weapon + ammo), under money/clock.
+  const topRight = $('top-right');
+  if (topRight && !$('weapon-panel')) {
+    const wp = document.createElement('div');
+    wp.id = 'weapon-panel';
+    wp.innerHTML = '<div class="wp-sil"></div><div><div class="wp-name"></div><div class="wp-ammo"></div><div class="wp-hint">R — RELOAD</div></div>';
+    topRight.appendChild(wp);
+  }
+  el.weaponPanel = $('weapon-panel');
+  el.wpSil = el.weaponPanel ? el.weaponPanel.querySelector('.wp-sil') : null;
+  el.wpName = el.weaponPanel ? el.weaponPanel.querySelector('.wp-name') : null;
+  el.wpAmmo = el.weaponPanel ? el.weaponPanel.querySelector('.wp-ammo') : null;
+
+  // GTA-style radio badge (in-car notification, top-left under the mission
+  // panel): station name + genre/BPM + switch hint. Replaces the small
+  // drive-panel radio line (hidden by CSS above).
+  if (hud && !$('radio-badge')) {
+    const rb = document.createElement('div');
+    rb.id = 'radio-badge';
+    rb.innerHTML = '<div class="rb-name"></div><div class="rb-sub"></div><div class="rb-hint">R — CHANGE STATION</div>';
+    hud.appendChild(rb);
+  }
+  el.radioBadge = $('radio-badge');
+  el.rbName = el.radioBadge ? el.radioBadge.querySelector('.rb-name') : null;
+  el.rbSub = el.radioBadge ? el.radioBadge.querySelector('.rb-sub') : null;
+
   // Build the 4 weapon-rack slots once from WEAPONS.
   weaponSlots = [];
   if (el.weaponRack) {
@@ -461,6 +533,21 @@ export function renderHUD(G) {
     }
   });
 
+  // --- GTA-style top-right weapon panel: current weapon + ammo ---
+  if (el.weaponPanel) {
+    const w = (G.combat && G.combat.weapons && G.combat.weapons[wi])
+      ? G.combat.weapons[wi] : WEAPONS[wi];
+    const wammo = (G.combat && G.combat.weapons && G.combat.weapons[wi])
+      ? G.combat.weapons[wi].ammo : WEAPONS[wi].ammo;
+    const wsig = `${wi}|${wammo}`;
+    if (last.wpSig !== wsig) {
+      last.wpSig = wsig;
+      if (el.wpSil) el.wpSil.innerHTML = weaponSVG(w.name);
+      if (el.wpName) el.wpName.textContent = String(w.name || '').toUpperCase();
+      if (el.wpAmmo) el.wpAmmo.innerHTML = `${wammo} <small>AMMO</small>`;
+    }
+  }
+
   // --- drive panel: gauge + digital speed + nitro lamp ---
   const inCar = p.mode === 'car' && G.driving && G.driving.car;
   const speedMs = inCar ? Math.abs(G.driving.speed || 0) : Math.abs(p.speed || 0);
@@ -482,7 +569,22 @@ export function renderHUD(G) {
   setText(el.vehicleName, 'vname', vname);
   const ri = (G.audio && typeof G.audio.radioIndex === 'number') ? G.audio.radioIndex : 0;
   const station = RADIO[ri] || RADIO[0];
-  setText(el.radio, 'radio', `${station.name} — ${station.genre}`);
+  // Radio badge (in-car only, GTA-style notification): station + genre/BPM.
+  if (el.radioBadge) {
+    const showRadio = inCar;
+    if (last.radioVisible !== showRadio) {
+      last.radioVisible = showRadio;
+      el.radioBadge.classList.toggle('hidden', !showRadio);
+    }
+    if (showRadio) {
+      const rsig = `${ri}`;
+      if (last.radioSig !== rsig) {
+        last.radioSig = rsig;
+        if (el.rbName) el.rbName.textContent = `♪ ${station.name}`;
+        if (el.rbSub) el.rbSub.textContent = `${station.genre} · ${station.bpm} BPM`;
+      }
+    }
+  }
 
   // --- score popups from gameplay state (drift / near-miss / queued events) ---
   pollScoreEvents(G);
