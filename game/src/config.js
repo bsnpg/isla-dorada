@@ -113,13 +113,16 @@ export const POLICE = {
   decayClearSeconds: 20, // all units > 120 m for this long starts wanted decay
 };
 
-// Weapon rack slots 1-4. `flash` scales the muzzle-flash sprite; `tracer` is
-// the tracer-line colour for that weapon.
+// Weapon rack slots 1-5. `flash` scales the muzzle-flash sprite; `tracer` is
+// the tracer-line colour for that weapon. Ammo is a real mag/reserve split:
+// `magSize` rounds in the magazine, `reserve` rounds carried spare, and
+// `ammo` (mag + reserve) is kept only for legacy readers.
 export const WEAPONS = [
-  { name: 'Pistol',  damage: 34, rate: 0.32, ammo: 48,  range: 60, flash: 0.9, tracer: 0xffe08a },
-  { name: 'SMG',     damage: 18, rate: 0.09, ammo: 120, range: 45, flash: 0.7, tracer: 0xffd76a },
-  { name: 'Shotgun', damage: 70, rate: 0.9,  ammo: 24,  range: 25, flash: 1.5, tracer: 0xffb347 },
-  { name: 'Rifle',   damage: 55, rate: 0.14, ammo: 90,  range: 90, flash: 1.1, tracer: 0xfff2b0 },
+  { name: 'Pistol',  damage: 34, rate: 0.32, ammo: 60,  magSize: 12, reserve: 48,  range: 60,  flash: 0.9, tracer: 0xffe08a },
+  { name: 'SMG',     damage: 18, rate: 0.09, ammo: 192, magSize: 32, reserve: 160, range: 45,  flash: 0.7, tracer: 0xffd76a },
+  { name: 'Shotgun', damage: 70, rate: 0.9,  ammo: 30,  magSize: 6,  reserve: 24,  range: 25,  flash: 1.5, tracer: 0xffb347 },
+  { name: 'Rifle',   damage: 55, rate: 0.14, ammo: 120, magSize: 30, reserve: 90,  range: 90,  flash: 1.1, tracer: 0xfff2b0 },
+  { name: 'Bazooka', damage: 220, rate: 1.2, ammo: 13,  magSize: 1,  reserve: 12,  range: 120, flash: 2.0, tracer: 0xff7733 },
 ];
 
 // Arcade score popups: drift chains and near misses pay cash and are exposed
@@ -181,5 +184,5 @@ export const KEYS = {
   garage: 'KeyG',
   radioNext: 'KeyR',
   pause: 'Escape',
-  weapon1: 'Digit1', weapon2: 'Digit2', weapon3: 'Digit3', weapon4: 'Digit4',
+  weapon1: 'Digit1', weapon2: 'Digit2', weapon3: 'Digit3', weapon4: 'Digit4', weapon5: 'Digit5',
 };

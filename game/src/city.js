@@ -564,7 +564,7 @@ export function buildCity(G) {
   boardwalk.receiveShadow = true;
   scene.add(boardwalk);
   // Stalls with striped awnings along the boardwalk (east edge, clear of the road).
-  const stallSpots = [-140, -100, -70, 20, 60, 100, 150, 200];
+  const stallSpots = [-180, -140, -120, -100, -70, 20, 60, 100, 120, 150, 180, 200];
   for (const sz of stallSpots) {
     if (Math.abs(sz - LANDMARK_SPOTS.ferrisWheel.z) < 28) continue;
     const stall = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: pick(rng, [0xf2e6c9, 0x4fb3d9, 0xe88ab0]), roughness: 0.9 }));
@@ -600,7 +600,7 @@ export function buildCity(G) {
 
   // Beach umbrellas + towels on the sand west of the boardwalk.
   const umbrellaSpots = [];
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 64; i++) {
     const z = range(rng, -290, 290);
     if (Math.abs(z - LANDMARK_SPOTS.ferrisWheel.z) < 30) continue;
     if (Math.abs(z - 240) < 14) continue; // marina pier
@@ -726,9 +726,12 @@ export function buildCity(G) {
   pier2.position.set(-300, 0.05, -200);
   scene.add(pier2);
   for (const bz of [215, 245, 275, 190, 262]) addBoat(-312, bz, null);
+  addBoat(-312, 100, null);
+  addBoat(-312, -40, 0xe88ab0);
   addBoat(-330, 150, 0xf2e6c9);
   addBoat(-335, -120, 0xff8a5a);
   addBoat(-325, -260, 0x7ec8e8);
+  addBoat(-338, -200, 0x4fb3d9);
   // Harbor boats, east side near the container yard.
   addBoat(240, 300, null);
   addBoat(260, 280, 0xe88ab0);
@@ -780,7 +783,7 @@ export function buildCity(G) {
     palmSpots.push({ x: -288 + range(rng, -3, 3), z: z + range(rng, -4, 4) });
     if (rng() < 0.5) palmSpots.push({ x: -296 + range(rng, -2, 2), z: z + range(rng, -4, 4) });
   }
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 150; i++) {
     const line = pick(rng, ROAD_LINES);
     const s = range(rng, -280, 280);
     const side = rng() < 0.5 ? -9.5 : 9.5;

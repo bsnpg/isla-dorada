@@ -3,6 +3,7 @@
 // saveSummary() reads the stored save without loading it, so the title
 // screen can show the completion percentage on the CONTINUE button.
 import { GAME, MISSIONS } from './config.js';
+import { serializeProgression, applyProgressionSave } from './progression.js';
 
 function readRaw() {
   try {
@@ -26,6 +27,8 @@ export function saveGame(G) {
         ? { x: G.player.pos.x, z: G.player.pos.z } : { x: 0, z: 0 },
       health: G.player ? G.player.health : 100,
       armour: G.player ? G.player.armour : 0,
+      maxHealth: G.player ? (G.player.maxHealth || 100) : 100,
+      progression: serializeProgression(G),
       savedAt: Date.now(),
     };
     window.localStorage.setItem(GAME.saveKey, JSON.stringify(data));
@@ -42,6 +45,21 @@ export function loadGame(G) {
   if (typeof data.money === 'number' && G.player) G.player.money = data.money;
   if (typeof data.health === 'number' && G.player) G.player.health = data.health;
   if (typeof data.armour === 'number' && G.player) G.player.armour = data.armour;
+
+  // Progression: old saves have no `progression` block — the fresh defaults
+  // from initProgression stay untouched (backward-compatible).
+  if (data.progression && G.progression) {
+    applyProgressionSave(G, data.progression);
+  }
+  if (typeof data.maxHealth === 'number' && G.player) {
+    G.player.maxHealth = Math.max(100, data.maxHealth);
+  }
+  // Clamp health to the cap even for old saves (no progression block):
+  // a stored health above the fresh 100 cap must not survive the load.
+  if (G.player && typeof G.player.maxHealth === 'number'
+      && G.player.health > G.player.maxHealth) {
+    G.player.health = G.player.maxHealth;
+  }
 
   if (data.upgrades && typeof data.upgrades === 'object') {
     if (!G.garage) G.garage = { owned: {} };
@@ -85,6 +103,10 @@ export function saveSummary() {
       ? data.stats.playSeconds : 0,
     carsStolen: (data.stats && typeof data.stats.carsStolen === 'number')
       ? data.stats.carsStolen : 0,
+    idolsFound: (data.progression && data.progression.collected && Array.isArray(data.progression.collected))
+      ? data.progression.collected.filter(Boolean).length : 0,
+    repLevel: (data.progression && data.progression.rep && typeof data.progression.rep.level === 'number')
+      ? data.progression.rep.level : 1,
   };
 }
 

@@ -9,11 +9,11 @@
 // chaotic combat cover: flipped police car + burning car + firing enemies +
 // a ramming unit, all in one call.
 import * as THREE from 'three';
-import { WEAPONS } from './config.js';
+import { KEYS, WEAPONS } from './config.js';
 import { Input } from './input.js';
 import { clamp, lerp } from './random.js';
-import { makeCar, setCarOnFire, spawnFire, spawnSmoke, spawnSparks } from './driving.js';
-import { setWanted, spawnFlippedPoliceCar, spawnPoliceCar, spawnRammingPolice } from './police.js';
+import { explodeCar, flipCar, makeCar, setCarOnFire, spawnFire, spawnSmoke, spawnSparks } from './driving.js';
+import { flipPoliceCar, setWanted, spawnFlippedPoliceCar, spawnPoliceCar, spawnRammingPolice } from './police.js';
 import { initDrops, spawnEnemyDrop, updateDrops } from './drops.js';
 
 const TRACER_POOL = 16;
@@ -87,9 +87,36 @@ export function initCombat(G) {
   initDrops(G); // enemy drops: cash + weapon pickups from downed enemies
   G.combat = {
     weaponIndex: 0,
-    weapons: WEAPONS.map((w) => ({ ...w })), // deep copy of the rack
+    // Real mag/reserve split per weapon. `ammo` stays as a live total
+    // (mag + reserve) so legacy readers (drops.js collect, shots.js staging)
+    // keep working: adding to `ammo` tops up the reserve, taking from it
+    // drains reserve first, then the mag.
+    weapons: WEAPONS.map((w) => {
+      const o = {
+        ...w,
+        mag: w.magSize,
+        magSize: w.magSize,
+        reserve: w.reserve,
+      };
+      Object.defineProperty(o, 'ammo', {
+        enumerable: true,
+        get() { return o.mag + o.reserve; },
+        set(v) {
+          let d = v - (o.mag + o.reserve);
+          if (d > 0) o.reserve += d;
+          else if (d < 0) {
+            const fromReserve = Math.min(o.reserve, -d);
+            o.reserve -= fromReserve;
+            d += fromReserve;
+            if (d < 0) o.mag = Math.max(0, o.mag + d);
+          }
+        },
+      });
+      return o;
+    }),
     enemies: [],
     downed: [], // bodies that fell and stay down (visible, not active targets)
+    shake: 0, // screen-shake magnitude (camera agent wires this in); set by explosions
     _fireTimer: 0,
     _tracers: [],
     _tracerIdx: 0,
@@ -98,6 +125,11 @@ export function initCombat(G) {
     _flashLight: null,
     _dmgNums: [],
     _dmgIdx: 0,
+    _rockets: [], // live bazooka rockets { mesh, vel, life, trailTimer }
+    _explosions: [], // fireball + shockwave-ring visuals { group|mesh, life, max, kind, radius }
+    _debris: [], // flying explosion debris { mesh, vx, vy, vz, life, spin }
+    _scorch: [], // ground scorch marks { mesh, life, max }
+    _lingering: [], // smoke columns still rising after an explosion { x, y, z, life, timer }
   };
   // One shared flash light: parked at the latest muzzle, decays fast.
   const light = new THREE.PointLight(0xffc860, 0, 18, 1.8);
@@ -264,8 +296,8 @@ function damagePlayer(G, amount) {
 function tryFire(G) {
   const c = G.combat;
   const w = c.weapons[c.weaponIndex];
-  if (!w || w.ammo <= 0) return;
-  w.ammo -= 1;
+  if (!w || w.mag <= 0) return; // empty mag: R reloads from reserve, never auto-fires
+  w.mag -= 1;
   G.stats.shotsFired += 1;
 
   // Gun position: just in front of the player at chest height.
@@ -274,6 +306,13 @@ function tryFire(G) {
   const from = new THREE.Vector3(
     p.x + Math.sin(h) * 0.6, 1.4, p.z + Math.cos(h) * 0.6,
   );
+
+  // Bazooka: no hitscan — launch a real rocket down the camera ray.
+  if (w.name === 'Bazooka') {
+    flashMuzzle(G, from, w.flash || 2);
+    fireRocket(G, from);
+    return;
+  }
   // Ray through the screen centre.
   const dir = new THREE.Vector3();
   G.camera.getWorldDirection(dir);
@@ -317,6 +356,334 @@ function tryFire(G) {
   } else {
     // Miss: the round still hits something — sparks where the tracer ends.
     spawnSparks(G, hitPoint.x, Math.max(0.3, hitPoint.y), hitPoint.z, 4);
+  }
+}
+
+// ---------------------------------------------------------------- bazooka
+function makeRocketMesh() {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.4, metalness: 0.7 });
+  const tipMat = new THREE.MeshStandardMaterial({ color: 0xd86a20, roughness: 0.5, metalness: 0.3 });
+  const flameMat = new THREE.MeshBasicMaterial({
+    color: 0xffa030, transparent: true, opacity: 0.95, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.85, 10), bodyMat);
+  body.rotation.x = Math.PI / 2;
+  group.add(body);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.3, 10), tipMat);
+  nose.rotation.x = Math.PI / 2;
+  nose.position.z = 0.57;
+  group.add(nose);
+  for (let i = 0; i < 4; i++) {
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.22, 0.18), bodyMat);
+    const a = (i / 4) * Math.PI * 2;
+    fin.position.set(Math.sin(a) * 0.1, Math.cos(a) * 0.1, -0.42);
+    fin.rotation.z = a;
+    group.add(fin);
+  }
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.55, 8), flameMat);
+  flame.rotation.x = -Math.PI / 2;
+  flame.position.z = -0.68;
+  group.add(flame);
+  return group;
+}
+
+// Launch a rocket from `from` along the camera ray. It flies, leaves a
+// smoke trail, and detonates via explodeAt on ground / enemy / car impact.
+function fireRocket(G, from) {
+  const c = G.combat;
+  const w = c.weapons[c.weaponIndex];
+  const dir = new THREE.Vector3();
+  G.camera.getWorldDirection(dir);
+  if (dir.lengthSq() < 0.01) dir.set(0, 0, 1);
+  dir.normalize();
+  const mesh = makeRocketMesh();
+  mesh.position.copy(from);
+  mesh.lookAt(from.x + dir.x, from.y + dir.y, from.z + dir.z);
+  G.scene.add(mesh);
+  spawnSmoke(G, from.x, from.y, from.z, 0.9);
+  c._rockets.push({
+    mesh,
+    vel: dir.clone().multiplyScalar(48),
+    life: (w ? w.range : 120) / 48 + 0.5,
+    trailTimer: 0,
+  });
+}
+
+function updateRockets(G, dt) {
+  const c = G.combat;
+  for (const r of [...c._rockets]) {
+    r.life -= dt;
+    r.mesh.position.addScaledVector(r.vel, dt);
+    r.trailTimer -= dt;
+    if (r.trailTimer <= 0) {
+      r.trailTimer = 0.03;
+      const p = r.mesh.position;
+      spawnSmoke(G, p.x, p.y, p.z, 0.55);
+    }
+    const p = r.mesh.position;
+    let hit = p.y <= 0.25 || r.life <= 0;
+    if (!hit) {
+      for (const e of c.enemies) {
+        if (e.state !== 'alive') continue;
+        if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) < 1.8 && Math.abs((e.pos.y + 1.2) - p.y) < 2.2) { hit = true; break; }
+      }
+    }
+    if (!hit) {
+      const carLists = [];
+      if (G.driving && G.driving.parked) carLists.push(G.driving.parked);
+      if (G.traffic && G.traffic.cars) carLists.push(G.traffic.cars);
+      if (G.driving && G.driving.car) carLists.push([G.driving.car]);
+      for (const list of carLists) {
+        for (const car of list) {
+          if (!car || !car.mesh) continue;
+          const cp = car.mesh.position;
+          if (Math.hypot(cp.x - p.x, cp.z - p.z) < 2.4 && p.y < 2.5) { hit = true; break; }
+        }
+        if (hit) break;
+      }
+    }
+    if (!hit && G.police) {
+      for (const u of G.police.units) {
+        if (u.kind !== 'car' || !u.pos || u.flipped) continue;
+        if (Math.hypot(u.pos.x - p.x, u.pos.z - p.z) < 2.4 && p.y < 2.5) { hit = true; break; }
+      }
+    }
+    if (hit) {
+      G.scene.remove(r.mesh);
+      c._rockets.splice(c._rockets.indexOf(r), 1);
+      explodeAt(G, p.x, Math.max(0.4, p.y), p.z, 12);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- explosion
+// The big one: fireball (orange/yellow spheres + upward cones), a tall smoke
+// column that lingers ~8 s, an expanding shockwave ring, flying debris,
+// screen shake, and a scorch mark on the ground for ~30 s. Everything is a
+// real mesh/particle in the scene at t = 0, so a frozen screenshot frame
+// already reads as an explosion — not just a flash.
+function spawnExplosionVisuals(G, x, y, z, radius) {
+  const c = G.combat;
+  // Fireball: layered spheres + flame cones, expanding and fading over 0.9 s.
+  const group = new THREE.Group();
+  group.position.set(x, Math.max(1, y), z);
+  const ballMats = [];
+  const ball = (color, r, bx, by, bz, emissive) => {
+    const m = new THREE.MeshStandardMaterial({
+      color, emissive: emissive || color, emissiveIntensity: 2.2,
+      transparent: true, opacity: 1, roughness: 0.6,
+    });
+    ballMats.push(m);
+    const s = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), m);
+    s.position.set(bx, by, bz);
+    group.add(s);
+    return s;
+  };
+  ball(0xff5a00, 2.4, 0, 0, 0);
+  ball(0xffa030, 1.8, 0.5, 0.6, 0.3);
+  ball(0xffe08a, 1.1, -0.3, 0.9, -0.2);
+  for (const [cx, cz, h] of [[0.9, 0.4, 2.6], [-0.8, -0.5, 2.1], [0.1, 0.9, 1.7]]) {
+    const m = new THREE.MeshStandardMaterial({
+      color: 0xff7a10, emissive: 0xff7a10, emissiveIntensity: 2,
+      transparent: true, opacity: 1, roughness: 0.6,
+    });
+    ballMats.push(m);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.9, h, 10), m);
+    cone.position.set(cx, h / 2, cz);
+    group.add(cone);
+  }
+  G.scene.add(group);
+  c._explosions.push({ group, mats: ballMats, life: 0.9, max: 0.9, kind: 'fireball' });
+  // Shockwave ring: flat on the ground, grows to the blast radius.
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0xffc060, transparent: true, opacity: 0.85, depthWrite: false,
+    side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 48), ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(x, 0.18, z);
+  G.scene.add(ring);
+  c._explosions.push({ mesh: ring, mat: ringMat, life: 0.7, max: 0.7, kind: 'ring', radius });
+  // Flying debris: small dark boxes thrown up and out, spinning, with gravity.
+  const debrisMat = new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.9 });
+  for (let i = 0; i < 12; i++) {
+    const d = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.28), debrisMat);
+    d.position.set(x, Math.max(1, y), z);
+    G.scene.add(d);
+    const a = G.rng() * Math.PI * 2;
+    const sp = 5 + G.rng() * 9;
+    c._debris.push({
+      mesh: d, vx: Math.sin(a) * sp, vy: 6 + G.rng() * 9, vz: Math.cos(a) * sp,
+      life: 1.4, spin: (G.rng() - 0.5) * 12,
+    });
+  }
+  // Scorch mark: dark circle on the ground, persists ~30 s.
+  const scorchMat = new THREE.MeshBasicMaterial({ color: 0x0a0a0a, transparent: true, opacity: 0.68, depthWrite: false });
+  const scorch = new THREE.Mesh(new THREE.CircleGeometry(3.2, 28), scorchMat);
+  scorch.rotation.x = -Math.PI / 2;
+  scorch.position.set(x, 0.03, z);
+  G.scene.add(scorch);
+  c._scorch.push({ mesh: scorch, mat: scorchMat, life: 30, max: 30 });
+  // Lingering smoke column: puffs keep rising/fading for ~8 s.
+  c._lingering.push({ x, y: Math.max(1, y), z, life: 8, timer: 0 });
+  // Particles + light + shake.
+  spawnFire(G, x, 1, z, 30);
+  spawnSparks(G, x, 1, z, 50);
+  spawnSmoke(G, x, 2, z, 2.4);
+  spawnSmoke(G, x, 3.5, z, 2.0);
+  spawnSmoke(G, x, 1.2, z, 1.6);
+  if (c._flashLight) {
+    c._flashLight.position.set(x, y + 2, z);
+    c._flashLight.intensity = 250;
+  }
+  c.shake = 1.4;
+}
+
+function updateExplosionFX(G, dt) {
+  const c = G.combat;
+  for (const ex of [...c._explosions]) {
+    ex.life -= dt;
+    const f = Math.max(0, ex.life / ex.max);
+    if (ex.kind === 'fireball') {
+      const grow = 1 + (1 - f) * 2.2;
+      ex.group.scale.setScalar(grow);
+      ex.group.position.y += dt * 1.5;
+      for (const m of ex.mats) m.opacity = f;
+    } else if (ex.kind === 'ring') {
+      const s = 1 + (1 - f) * ex.radius;
+      ex.mesh.scale.setScalar(s);
+      ex.mat.opacity = 0.85 * f;
+    }
+    if (ex.life <= 0) {
+      G.scene.remove(ex.group || ex.mesh);
+      c._explosions.splice(c._explosions.indexOf(ex), 1);
+    }
+  }
+  for (const d of [...c._debris]) {
+    d.life -= dt;
+    d.vy -= 18 * dt;
+    d.mesh.position.x += d.vx * dt;
+    d.mesh.position.y += d.vy * dt;
+    d.mesh.position.z += d.vz * dt;
+    d.mesh.rotation.x += d.spin * dt;
+    d.mesh.rotation.y += d.spin * 0.7 * dt;
+    if (d.life <= 0 || d.mesh.position.y < 0.05) {
+      G.scene.remove(d.mesh);
+      c._debris.splice(c._debris.indexOf(d), 1);
+    }
+  }
+  for (const s of [...c._scorch]) {
+    s.life -= dt;
+    if (s.life < 5) s.mat.opacity = 0.68 * (s.life / 5);
+    if (s.life <= 0) {
+      G.scene.remove(s.mesh);
+      c._scorch.splice(c._scorch.indexOf(s), 1);
+    }
+  }
+  for (const l of [...c._lingering]) {
+    l.life -= dt;
+    l.timer -= dt;
+    if (l.timer <= 0 && l.life > 0) {
+      l.timer = 0.3;
+      const rise = (8 - l.life) * 0.9;
+      spawnSmoke(G, l.x + (G.rng() - 0.5) * 1.6, l.y + rise, l.z + (G.rng() - 0.5) * 1.6, 1.6);
+    }
+    if (l.life <= 0) c._lingering.splice(c._lingering.indexOf(l), 1);
+  }
+}
+
+// Detonate at (x, y, z) with blast `radius` (default 12 m). Kills and throws
+// enemies (they fall and drop loot via the normal downed path), wrecks/flips
+// police units, flips or blows up cars in range, and shakes the camera.
+// Exported so the screenshot stager can trigger it directly.
+export function explodeAt(G, x, y, z, radius) {
+  if (!G.combat) return;
+  const r = radius || 12;
+  spawnExplosionVisuals(G, x, y, z, r);
+  // Enemies: thrown up + away, killed outright inside the radius. The
+  // falling -> downed transition in updateEnemy drops their loot (cash +
+  // weapon) through spawnEnemyDrop, exactly like a gun kill.
+  for (const e of [...G.combat.enemies]) {
+    const dx = e.pos.x - x, dz = e.pos.z - z;
+    const d = Math.hypot(dx, dz);
+    if (d > r) continue;
+    const falloff = 1 - d / r;
+    const nx = dx / (d || 1), nz = dz / (d || 1);
+    const throwDist = 3 + falloff * 7; // up to 10 m at the centre — visibly thrown
+    e.pos.x += nx * throwDist;
+    e.pos.z += nz * throwDist;
+    e.mesh.rotation.y = Math.atan2(nx, nz);
+    const dmg = Math.round(220 * (0.5 + falloff * 0.5));
+    e.hp -= dmg;
+    spawnDamageNumber(G, e.pos.x, e.pos.y + 2.3, e.pos.z, `-${dmg}`, '#ff8a3a');
+    if (e.hp <= 0 && e.state === 'alive') {
+      e.state = 'falling';
+      e.fallTimer = 0;
+    } else if (e.state === 'alive') {
+      e.flashTimer = 0.12;
+    }
+  }
+  // Police units: wrecked outright (flipPoliceCar handles the flip + smoke).
+  if (G.police) {
+    for (const u of [...G.police.units]) {
+      if (u.kind !== 'car' || !u.pos || u.flipped) continue;
+      if (Math.hypot(u.pos.x - x, u.pos.z - z) <= r) {
+        u.health = 0;
+        flipPoliceCar(G, u);
+      }
+    }
+  }
+  // Cars: close ones blow up, further ones flip and catch fire.
+  const hitCar = (car) => {
+    if (!car || !car.mesh || car.wrecked) return;
+    const p = car.mesh.position;
+    const d = Math.hypot(p.x - x, p.z - z);
+    if (d > r) return;
+    if (d <= r * 0.55) explodeCar(G, car);
+    else {
+      flipCar(G, car);
+      setCarOnFire(G, car);
+    }
+  };
+  if (G.driving) {
+    for (const car of G.driving.parked || []) hitCar(car);
+    if (G.driving.car) hitCar(G.driving.car);
+  }
+  if (G.traffic) for (const car of G.traffic.cars || []) hitCar(car);
+  // Wowo, if caught close in: shoved away and hurt (never insta-killed).
+  if (G.player && G.player.mode === 'foot') {
+    const dx = G.player.pos.x - x, dz = G.player.pos.z - z;
+    const d = Math.hypot(dx, dz);
+    if (d < r * 0.6) {
+      damagePlayer(G, Math.round(28 * (1 - d / r)));
+      const nx = dx / (d || 1), nz = dz / (d || 1);
+      G.player.pos.x += nx * 2.5;
+      G.player.pos.z += nz * 2.5;
+    }
+  }
+  // Blast loot: kills above go through the falling -> downed transition in
+  // updateEnemy, which calls spawnEnemyDrop (cash + weapon) — same as a gun kill.
+}
+
+// Pose Wowo mid-flight for the screenshot stager: jetpack on, flame lit,
+// lifted off the ground. In live play updatePlayer takes over from here
+// (hold Space to keep thrusting); in a frozen shot the pose holds as set.
+export function setJetpack(G, on) {
+  if (!G.jetpack) G.jetpack = { fuel: 100, maxFuel: 100, active: false, owned: true, vy: 0, _smokeTimer: 0 };
+  G.jetpack.owned = true;
+  G.jetpack.active = !!on;
+  const flame = G.player && G.player.mesh ? G.player.mesh.userData.jetpackFlame : null;
+  if (on) {
+    G.jetpack.fuel = Math.max(G.jetpack.fuel, 50);
+    G.jetpack.vy = 6;
+    if (G.player) G.player.pos.y = Math.max(G.player.pos.y, 2.5);
+    if (flame) { flame.visible = true; flame.scale.setScalar(1.2); flame.material.opacity = 0.95; }
+    if (G.player && G.driving) spawnSmoke(G, G.player.pos.x, G.player.pos.y + 0.7, G.player.pos.z, 0.8);
+  } else {
+    G.jetpack.vy = 0;
+    if (flame) flame.visible = false;
   }
 }
 
@@ -435,19 +802,34 @@ export function updateCombat(G, dt) {
   // Drops bob on the asphalt and are collected by walking/driving over them.
   updateDrops(G, dt);
 
+  // Bazooka rockets in flight + explosion FX (fireball, ring, debris,
+  // scorch, lingering smoke) keep updating in play mode.
+  updateRockets(G, dt);
+  updateExplosionFX(G, dt);
+  // Screen shake decays; the camera agent reads G.combat.shake each frame.
+  if (c.shake > 0) c.shake = Math.max(0, c.shake - dt * 1.6);
+
   if (G.mode !== 'play') return;
 
-  // Weapon switching: keys 1-4, or mouse wheel cycles the rack.
-  for (let i = 0; i < 4; i++) {
-    if (Input.pressed(`Digit${i + 1}`)) c.weaponIndex = i;
+  // Weapon switching: keys 1-5, or mouse wheel cycles the rack.
+  for (let i = 0; i < 5; i++) {
+    if (Input.pressed(KEYS[`weapon${i + 1}`])) c.weaponIndex = i;
   }
   const wheel = Input.consumeWheel();
   if (wheel !== 0) {
-    c.weaponIndex = (c.weaponIndex + (wheel > 0 ? 1 : 3)) % 4;
+    c.weaponIndex = (c.weaponIndex + (wheel > 0 ? 1 : 4)) % 5;
   }
-  // R reloads the current weapon from infinite reserve.
+  // R reloads the current weapon from its reserve into the mag. If the
+  // reserve is empty, nothing loads and the weapon stays unable to fire.
   if (Input.pressed('KeyR')) {
-    c.weapons[c.weaponIndex].ammo = WEAPONS[c.weaponIndex].ammo;
+    const w = c.weapons[c.weaponIndex];
+    if (w) {
+      const take = Math.min(w.magSize - w.mag, w.reserve);
+      if (take > 0) {
+        w.mag += take;
+        w.reserve -= take;
+      }
+    }
   }
 
   // Fire only on foot.
@@ -455,7 +837,7 @@ export function updateCombat(G, dt) {
   c._fireTimer -= dt;
   if (Input.mouseDown && c._fireTimer <= 0) {
     const w = c.weapons[c.weaponIndex];
-    if (w && w.ammo > 0) {
+    if (w && w.mag > 0) {
       c._fireTimer = w.rate;
       tryFire(G);
     }

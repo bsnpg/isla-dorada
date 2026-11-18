@@ -78,8 +78,8 @@
   .menu { margin-top: 28px; display: flex; flex-direction: column; gap: 10px; width: 320px; }
   .menu button, .screen button { pointer-events: auto; cursor: pointer; font: 700 16px var(--font-ui); color: var(--ink); background: rgba(242,194,48,.14); border: 1px solid var(--gold); border-radius: 6px; padding: 12px; }
   .menu button:hover, .screen button:hover { background: rgba(242,194,48,.32); }
-  .chars { margin-top: 26px; display: flex; gap: 14px; }
-  .char { width: 170px; text-align: center; background: var(--panel); border: 1px solid rgba(242,194,48,.35); border-radius: 8px; padding: 12px 8px; }
+  .chars { margin-top: 26px; display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 1120px; }
+  .char { width: 160px; text-align: center; background: var(--panel); border: 1px solid rgba(242,194,48,.35); border-radius: 8px; padding: 12px 8px; }
   .char .face { width: 64px; height: 64px; margin: 0 auto 8px; border-radius: 50%; background: #3a2f1a; border: 2px solid var(--gold); display: flex; align-items: center; justify-content: center; font: 800 28px var(--font-ui); color: var(--gold); }
   .char .who { font: 800 14px var(--font-ui); }
   .char .role { font-size: 12px; color: var(--muted); margin-top: 3px; }
@@ -105,8 +105,15 @@
   #map-legend h3 { margin: 0 0 6px; color: var(--gold); letter-spacing: 1px; }
   .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font: 600 12px var(--font-read); color: var(--muted); line-height: 1.5; }
   .legend-grid b { color: var(--ink); }
-  /* garage */
-  #garage-screen .menu { width: 460px; }
+  /* garage — right-side panel over the 3D garage interior: the left of the
+     screen stays nearly clear so the car on the hydraulic lift, the neon
+     GARAGE DORADA sign and the work lights read through (garage.js drives
+     the camera). The DOM upgrade list itself is unchanged. */
+  #garage-screen { align-items: flex-end; justify-content: center; padding: 20px 44px 20px 20px;
+    background: linear-gradient(90deg, rgba(10,8,20,0.02) 0%, rgba(10,8,20,0.35) 48%, rgba(10,8,20,0.90) 68%); }
+  #garage-screen h2 { text-align: right; }
+  #garage-screen .menu { width: 440px; }
+  #garage-money { font: 800 20px var(--font-read); color: #8fe388; margin: 10px 0 4px; text-align: right; }
   .upg { display: flex; justify-content: space-between; gap: 10px; background: var(--panel); border: 1px solid rgba(242,194,48,.35); border-radius: 6px; padding: 10px 12px; font-size: 14px; }
   .upg .price { color: var(--green); font-family: var(--font-read); }
   .upg button { padding: 6px 14px; font-size: 13px; }
@@ -174,6 +181,9 @@
     <div class="char"><div class="face">W</div><div class="who">WOWO</div><div class="role">Ex-Sergeant, dishonorably discharged. Driver, fighter, tactician.</div></div>
     <div class="char"><div class="face">B</div><div class="who">OFFICER BRAGA</div><div class="role">IDPD. The man who framed Wowo — and the man who must fall.</div></div>
     <div class="char"><div class="face">M</div><div class="who">MARA</div><div class="role">The witness. She saw everything — if the IDPD does not reach her first.</div></div>
+    <div class="char"><div class="face">R</div><div class="who">RICO SALAS</div><div class="role">The fixer. Every back door on Isla Dorada opens for him — for a price.</div></div>
+    <div class="char"><div class="face">L</div><div class="who">LUNA VELAS</div><div class="role">Getaway driver. If she is behind the wheel, the IDPD is already behind.</div></div>
+    <div class="char"><div class="face">K</div><div class="who">KIKO TAN</div><div class="role">The hacker. Cracks IDPD cameras and safes from a shack on the beach.</div></div>
   </div>
   <div class="menu">
     <button id="btn-continue">CONTINUE — SAVE SLOT 1</button>
@@ -182,7 +192,7 @@
   </div>
   <div id="howto" class="hidden">
     <b>WASD</b> drive / walk &nbsp;·&nbsp; <b>E</b> steal or enter car, exit car &nbsp;·&nbsp; <b>Mouse</b> aim on foot, <b>Click</b> shoot<br>
-    <b>1–4</b> switch weapon &nbsp;·&nbsp; <b>Space</b> handbrake &nbsp;·&nbsp; <b>Shift</b> nitro (if upgraded) &nbsp;·&nbsp; <b>R</b> change radio<br>
+    <b>1–5</b> switch weapon &nbsp;·&nbsp; <b>Space</b> handbrake / jetpack (on foot) &nbsp;·&nbsp; <b>Shift</b> nitro (if upgraded) &nbsp;·&nbsp; <b>R</b> change radio / reload<br>
     <b>M</b> city map &nbsp;·&nbsp; <b>G</b> garage (at the garage) &nbsp;·&nbsp; <b>Esc</b> pause<br>
     Steal cars, outrun the IDPD, finish all 8 jobs — and clear Wowo's name.
   </div>

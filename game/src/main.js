@@ -18,6 +18,7 @@ import { initHUD, renderHUD, showDialogue, flashToast } from './hud.js';
 import { initMinimap, renderMinimap } from './minimap.js';
 import { initAudio, updateAudio } from './audio.js';
 import { initGarage } from './garage.js';
+import { initProgression, updateProgression, resetProgression } from './progression.js';
 import { saveGame, loadGame, hasSave } from './save.js';
 import { initMap } from './map.js';
 import { initTitle, showTitle } from './title.js';
@@ -129,10 +130,51 @@ function updateCamera(dt) {
   camPos.copy(camTarget).addScaledVector(back, dist);
   camPos.y = camTarget.y + dist * Math.sin(pitch) + 3.2;
   G.camera.position.lerp(camPos, 1 - Math.pow(0.001, dt));
+  // Camera shake: the combat module sets G.combat.shake on hits/explosions
+  // and decays it; a small random offset scaled by the live value.
+  const shake = (G.combat && typeof G.combat.shake === 'number') ? G.combat.shake : 0;
+  if (shake > 0.001) {
+    const s = shake * 0.35;
+    G.camera.position.x += (G.rng() - 0.5) * s;
+    G.camera.position.y += (G.rng() - 0.5) * s;
+    G.camera.position.z += (G.rng() - 0.5) * s;
+  }
   camLook.copy(camTarget).add(new THREE.Vector3(0, 2.2, 0));
   G.camera.lookAt(camLook);
   G.camera.fov = 62 + Math.min(10, speed * 0.14);
   G.camera.updateProjectionMatrix();
+}
+
+// Side jobs live in sidejobs.js, which another agent is creating in
+// parallel — it may not exist yet. A static import would break the whole
+// boot while the file is missing, so it is loaded dynamically (with a
+// retry every 5 s in play until it lands) and the init/update calls below
+// are no-ops until the module arrives.
+let sideJobsMod = null;
+let sideJobsLoading = false;
+let sideJobsRetry = 0;
+function loadSideJobs(G) {
+  if (sideJobsMod || sideJobsLoading) return;
+  sideJobsLoading = true;
+  import('./sidejobs.js').then((m) => {
+    sideJobsMod = m;
+    if (m.initSideJobs) m.initSideJobs(G);
+  }).catch(() => {
+    sideJobsMod = null; // not landed yet — retried from stepPlay
+  }).finally(() => {
+    sideJobsLoading = false;
+  });
+}
+function updateSideJobsTick(G, dt) {
+  if (sideJobsMod && sideJobsMod.updateSideJobs) {
+    sideJobsMod.updateSideJobs(G, dt);
+    return;
+  }
+  sideJobsRetry += dt;
+  if (sideJobsRetry >= 5) {
+    sideJobsRetry = 0;
+    loadSideJobs(G);
+  }
 }
 
 // ---------------------------------------------------------------- boot
@@ -157,8 +199,19 @@ function boot() {
   initMinimap(G);
   initAudio(G);
   initGarage(G);
+  initProgression(G);
   initMap(G);
   initTitle(G);
+  loadSideJobs(G);
+  // NEW GAME also resets progression (title.js owns the button and resets
+  // money/stats/garage, but not progression — this listener runs alongside
+  // it, in main.js, so a new game starts with fresh idols/rep/skills).
+  const btnNew = document.getElementById('btn-new');
+  if (btnNew) {
+    btnNew.addEventListener('click', () => {
+      try { resetProgression(G); } catch (e) { /* reset is best-effort */ }
+    });
+  }
 
   if (hasSave()) {
     document.getElementById('btn-continue').disabled = false;
@@ -184,6 +237,8 @@ function stepPlay(dt) {
   updatePolice(G, dt);
   updateMissions(G, dt);
   updateCombat(G, dt);
+  updateProgression(G, dt);
+  updateSideJobsTick(G, dt);
   updateAudio(G);
   updateCamera(dt);
   renderHUD(G);

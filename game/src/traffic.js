@@ -2,8 +2,8 @@
 // Cars drive the road grid on a lane offset, turning at intersections; peds
 // walk the sidewalks and the beach. Both are kept near the player and
 // despawned when far away. v2 is much denser: 26 cars and 40 peds instead of
-// 10/14, with brighter car colours and a dedicated beach-walker population so
-// the Beachfront never reads empty.
+// 10/14; v3 raises it to 40 cars and 80 peds, with brighter car colours and
+// a dedicated beach-walker population so the Beachfront never reads empty.
 // Same exports and entity shapes as v1: initTraffic, updateTraffic,
 // spawnTrafficCar, spawnPed. G.traffic = { cars, peds }.
 import * as THREE from 'three';
@@ -11,9 +11,9 @@ import { VEHICLES } from './config.js';
 import { clamp, pick, range } from './random.js';
 import { makeCarMesh } from './driving.js';
 
-const TARGET_CARS = 26;
-const TARGET_PEDS = 40;
-const TARGET_BEACH_PEDS = 10; // subset of TARGET_PEDS, on the sand/boardwalk
+const TARGET_CARS = 40;
+const TARGET_PEDS = 80;
+const TARGET_BEACH_PEDS = 16; // subset of TARGET_PEDS, on the sand/boardwalk
 const DESPAWN_CAR = 300;
 const DESPAWN_PED = 240;
 const LANE = 2.2;   // right-hand lane offset from the road centreline

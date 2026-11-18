@@ -7,6 +7,7 @@
 // wanted level and cash alongside the measured run numbers.
 import { DISTRICTS, MISSIONS, WORLD, KEYS, UPGRADES } from './config.js';
 import { Input } from './input.js';
+import { buyProperty, pips, SKILL_DEFS } from './progression.js';
 
 let canvas = null;
 let ctx = null;
@@ -14,7 +15,27 @@ let checklistEl = null;
 let currentJobEl = null;
 let statsEl = null;
 let legendEl = null;
+let progEl = null;
+let garageEl = null;
 let currentRoads = null;
+
+// SIDEJOB_LEGEND lives in sidejobs.js, which another agent is creating in
+// parallel — it may not exist yet. A static import would break the whole
+// module (and the boot) while the file is missing, so it is loaded
+// dynamically and the legend renders its entries as soon as they arrive.
+let sideJobLegend = null;
+let sideJobLoading = false;
+function ensureSideJobLegend() {
+  if (sideJobLegend || sideJobLoading) return;
+  sideJobLoading = true;
+  import('./sidejobs.js').then((m) => {
+    sideJobLegend = Array.isArray(m.SIDEJOB_LEGEND) ? m.SIDEJOB_LEGEND : null;
+  }).catch(() => {
+    sideJobLegend = null; // not landed yet — legend renders without it
+  }).finally(() => {
+    sideJobLoading = false;
+  });
+}
 
 const SIZE = 640;
 const SCALE = SIZE / WORLD.size; // px per metre
@@ -201,6 +222,69 @@ function refreshStats(G) {
     `GARAGE <b>${garage}</b>`;
 }
 
+function fmtMoney(n) {
+  return '$' + Math.floor(n || 0).toLocaleString('en-US');
+}
+
+// PROGRESSION section (map side panel): collectibles, REP, skills pips,
+// properties with BUY buttons. Every number is read from live G.progression.
+function refreshProgression(G) {
+  if (!progEl) return;
+  const pr = G.progression;
+  if (!pr) {
+    progEl.innerHTML = '<h3>PROGRESSION</h3><div>Loading…</div>';
+    return;
+  }
+  const c = pr.collectibles || {};
+  const found = c.found || 0;
+  const total = c.total || 20;
+  const rep = pr.rep || { level: 1, xp: 0, xpNext: 500, nextUnlock: '' };
+  const repPct = Math.max(0, Math.min(100, Math.round(((rep.xp || 0) / (rep.xpNext || 500)) * 100)));
+  const idolPct = Math.max(0, Math.min(100, Math.round((found / total) * 100)));
+  const money = G.player ? G.player.money : 0;
+  const income = pr.properties.reduce((t, p) => t + (p.owned ? p.income : 0), 0);
+  const skills = SKILL_DEFS.map((d) => {
+    const lvl = (pr.skills && pr.skills[d.key]) || 0;
+    return `<div class="mp-skill"><span>${d.label} ${pips(lvl)}</span><span class="fx">${d.effect(lvl)}</span></div>`;
+  }).join('');
+  const props = pr.properties.map((p) => {
+    const afford = money >= p.price;
+    const btn = p.owned
+      ? '<b>OWNED ✓</b>'
+      : `<button data-buy="${p.id}" ${afford ? '' : 'disabled'}>${afford ? `BUY ${fmtMoney(p.price)}` : `NEED ${fmtMoney(p.price - money)}`}</button>`;
+    return `<div class="prop-row"><span><b>${p.name}</b><br>${fmtMoney(p.income)}/min</span>${btn}</div>`;
+  }).join('');
+  progEl.innerHTML =
+    '<h3>COLLECTIBLES — DORADA IDOLS</h3>' +
+    `<div class="mp-row"><span>Found</span><b>${found} / ${total}</b></div>` +
+    `<div class="mp-bar"><i style="width:${idolPct}%"></i></div>` +
+    '<h3>REP</h3>' +
+    `<div class="mp-row"><span>Level</span><b>LV ${rep.level || 1}</b></div>` +
+    `<div class="mp-bar"><i style="width:${repPct}%"></i></div>` +
+    `<div class="mp-row"><span>XP</span><b>${Math.floor(rep.xp || 0)} / ${rep.xpNext || 500}</b></div>` +
+    `<div class="mp-next">NEXT: ${rep.nextUnlock || ''}</div>` +
+    '<h3>SKILLS</h3>' + skills +
+    '<h3>PROPERTIES</h3>' + props +
+    `<div class="mp-row"><span>Property income</span><b>${fmtMoney(income)}/min</b></div>`;
+}
+
+// GARAGE section (map side panel): the car the upgrades apply to + every
+// upgrade row with its real price and owned pips from UPGRADES / G.garage.
+// Garage data is owned by garage.js — this only reads G.garage.owned.
+function refreshGarageSection(G) {
+  if (!garageEl) return;
+  const car = (G.driving && G.driving.car) ? G.driving.car : null;
+  const carName = car ? (car.name || (car.def && car.def.name) || 'YOUR CAR') : 'NO CAR — STEAL ONE FIRST';
+  const owned = (G.garage && G.garage.owned) || {};
+  const rows = UPGRADES.map((u) => {
+    const lvl = owned[u.id] || 0;
+    return `<div class="upg-row"><span><b>${u.name}</b> — ${u.desc}</span><span><b>${fmtMoney(u.price)}</b> ${pips(lvl, u.max)}</span></div>`;
+  }).join('');
+  garageEl.innerHTML =
+    '<h3>GARAGE</h3>' +
+    `<div class="mp-row"><span>Car</span><b>${carName}</b></div>` + rows;
+}
+
 export function initMap(G) {
   canvas = document.getElementById('map-canvas');
   ctx = canvas ? canvas.getContext('2d') : null;
@@ -208,6 +292,52 @@ export function initMap(G) {
   currentJobEl = document.getElementById('map-current-job');
   statsEl = document.getElementById('map-stats');
   legendEl = document.getElementById('map-legend');
+  // Progression + garage side-panel sections (created once here, refreshed
+  // by drawMap; the map side is scrollable, so they sit below the legend).
+  const side = document.getElementById('map-side');
+  if (side && !document.getElementById('map-progression')) {
+    const st = document.createElement('style');
+    st.id = 'map-prog-style';
+    st.textContent = `
+#map-progression, #map-garage { margin-top: 10px; background: var(--panel); border: 1px solid rgba(242,194,48,.5); border-radius: 6px; padding: 8px 10px; font: 600 12px var(--font-read); color: var(--muted); line-height: 1.6; }
+#map-progression h3, #map-garage h3 { margin: 6px 0 4px; color: var(--gold); letter-spacing: 1px; font-size: 12px; }
+#map-progression h3:first-child, #map-garage h3:first-child { margin-top: 0; }
+#map-progression b, #map-garage b { color: var(--ink); }
+#map-progression .mp-row, #map-garage .mp-row { display: flex; justify-content: space-between; gap: 8px; }
+#map-progression .mp-bar { height: 6px; background: rgba(245,239,224,.18); border-radius: 3px; overflow: hidden; margin: 2px 0 4px; }
+#map-progression .mp-bar i { display: block; height: 100%; background: #f2c230; }
+#map-progression .mp-next { color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+#map-progression .mp-skill { display: flex; justify-content: space-between; gap: 8px; }
+#map-progression .mp-skill .fx { color: var(--gold); }
+#map-progression .prop-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 2px 0; }
+#map-progression .prop-row button { font: 800 11px var(--font-ui); padding: 3px 10px; cursor: pointer; }
+#map-progression .prop-row button:disabled { opacity: .45; cursor: default; }
+#map-garage .upg-row { display: flex; justify-content: space-between; gap: 8px; }`;
+    document.head.appendChild(st);
+    progEl = document.createElement('div');
+    progEl.id = 'map-progression';
+    garageEl = document.createElement('div');
+    garageEl.id = 'map-garage';
+    const menu = side.querySelector('.menu');
+    if (menu) {
+      side.insertBefore(progEl, menu);
+      side.insertBefore(garageEl, menu);
+    } else {
+      side.appendChild(progEl);
+      side.appendChild(garageEl);
+    }
+    // One delegated listener: refreshProgression rebuilds the rows (and the
+    // BUY buttons) on every drawMap, so per-button listeners would not survive.
+    progEl.addEventListener('click', (e) => {
+      const btn = e.target && e.target.closest ? e.target.closest('[data-buy]') : null;
+      if (!btn) return;
+      if (buyProperty(G, btn.getAttribute('data-buy'))) refreshProgression(G);
+    });
+  } else {
+    progEl = document.getElementById('map-progression');
+    garageEl = document.getElementById('map-garage');
+  }
+  ensureSideJobLegend();
   const btn = document.getElementById('btn-close-map');
   if (btn) btn.addEventListener('click', () => closeMap(G));
   window.addEventListener('keydown', (e) => {
@@ -262,6 +392,28 @@ function refreshLegend(G) {
   rows.push(`<div>${swatch('dot', JOB_NEXT)}JOB ${rangeList(nextJobs)} — NEXT</div>`);
   for (const [key, label, shape, color] of POIS) rows.push(`<div>${swatch(shape, color)}${label}</div>`);
   rows.push(`<div><span style="display:inline-block;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:12px solid ${JOB_CURRENT};margin-right:6px;vertical-align:-1px;"></span><b>YOU</b> — PLAYER</div>`);
+  // Progression markers drawn on the map canvas (see drawMap): gold diamonds
+  // are uncollected Dorada Idols, squares are ownable properties.
+  const pr = G.progression;
+  const idolsLeft = pr ? (pr.collectibles.total - pr.collectibles.found) : 20;
+  rows.push(`<div>${swatch('diamond', '#f2c230')}DORADA IDOL — ${idolsLeft} LEFT</div>`);
+  rows.push(`<div>${swatch('square', '#58b368')}PROPERTY — OWNED / FOR SALE</div>`);
+  // Side-job legend entries, from sidejobs.js (loaded dynamically — the
+  // file may not exist yet; entries appear once it lands).
+  ensureSideJobLegend();
+  if (Array.isArray(sideJobLegend)) {
+    for (const entry of sideJobLegend) {
+      if (typeof entry === 'string') {
+        rows.push(`<div>${swatch('dot', '#8fe388')}${entry}</div>`);
+      } else if (entry && typeof entry === 'object') {
+        const label = entry.label || entry.text || entry.name || '';
+        if (!label) continue;
+        const color = entry.color || '#8fe388';
+        const shape = entry.shape || 'dot';
+        rows.push(`<div>${swatch(shape, color)}${label}</div>`);
+      }
+    }
+  }
   legendEl.innerHTML = `<h3>LEGEND</h3><div class="legend-grid">${rows.join('')}</div>`;
 }
 
@@ -455,6 +607,28 @@ export function drawMap(G) {
   const marker = (G.missions && G.missions.marker) ? posOf(G.missions.marker) : null;
   if (marker) drawDiamond(c, toPx(marker.x), toPx(marker.z), 9, '#f2c230');
 
+  // Progression markers: uncollected Dorada Idols (small gold diamonds) and
+  // properties (squares — green owned, gold outline for sale).
+  if (G.progression) {
+    for (const idol of G.progression.idols || []) {
+      if (idol.collected) continue;
+      drawDiamond(c, toPx(idol.x), toPx(idol.z), 5, '#f2c230');
+    }
+    for (const prop of G.progression.properties || []) {
+      const x = toPx(prop.x), y = toPx(prop.z);
+      c.save();
+      if (prop.owned) {
+        c.fillStyle = '#58b368';
+        c.fillRect(x - 6, y - 6, 12, 12);
+      } else {
+        c.strokeStyle = '#f2c230';
+        c.lineWidth = 2;
+        c.strokeRect(x - 6, y - 6, 12, 12);
+      }
+      c.restore();
+    }
+  }
+
   // Player arrow.
   if (G.player && G.player.pos) {
     const px = toPx(G.player.pos.x);
@@ -498,6 +672,8 @@ export function drawMap(G) {
   refreshChecklist(G);
   refreshCurrentJob(G);
   refreshStats(G);
+  refreshProgression(G);
+  refreshGarageSection(G);
   refreshLegend(G);
 }
 

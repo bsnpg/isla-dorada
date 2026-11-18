@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { MISSIONS } from './config.js';
 import { spawnBurningCar, spawnEnemy } from './combat.js';
+import { cancelSideJob } from './sidejobs.js';
 
 // Landmark coordinates (match city.js landmarks).
 const CASINO = { x: -120, z: -200 };
@@ -189,6 +190,8 @@ export function startMission(G, i) {
   const m = MISSIONS[Math.max(0, Math.min(i, MISSIONS.length - 1))];
   if (!m) return;
   if (!G.missions) initMissions(G);
+  // A story job starting cancels any active side job (sidejobs.js).
+  if (G.sideJobs && G.sideJobs.active) cancelSideJob(G);
   removeBeacon(G);
   G.missions.index = MISSIONS.indexOf(m);
   G.missions.stage = 1;

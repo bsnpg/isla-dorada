@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { KEYS } from './config.js';
 import { Input } from './input.js';
 import { angleLerp, clamp } from './random.js';
+import { spawnSmoke } from './driving.js';
 
 const START = { x: -120, z: 240 }; // Marina
 
@@ -42,7 +43,35 @@ function buildWowoMesh() {
     part.castShadow = true;
     g.add(part);
   }
-  g.userData = { legL, legR, armL, armR };
+  // Jetpack on Wowo's back: two tanks, a nozzle, and a flame cone that only
+  // shows while thrusting (player.js update / combat.js setJetpack pose it).
+  const tankMat = new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.35, metalness: 0.8 });
+  const tankBand = new THREE.MeshStandardMaterial({ color: 0xd86a20, roughness: 0.5, metalness: 0.4 });
+  const nozzleMat = new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.6, metalness: 0.6 });
+  const jetpack = new THREE.Group();
+  for (const tx of [-0.16, 0.16]) {
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.55, 12), tankMat);
+    tank.position.set(tx, 1.15, -0.26);
+    tank.castShadow = true;
+    jetpack.add(tank);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.115, 0.08, 12), tankBand);
+    band.position.set(tx, 1.32, -0.26);
+    jetpack.add(band);
+    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 0.12, 10), nozzleMat);
+    nozzle.position.set(tx, 0.82, -0.26);
+    jetpack.add(nozzle);
+  }
+  const flameMat = new THREE.MeshBasicMaterial({
+    color: 0xffa030, transparent: true, opacity: 0.9, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.85, 10), flameMat);
+  flame.rotation.x = Math.PI; // point down
+  flame.position.set(0, 0.42, -0.26);
+  flame.visible = false;
+  jetpack.add(flame);
+  g.add(jetpack);
+  g.userData = { legL, legR, armL, armR, jetpack, jetpackFlame: flame };
   return g;
 }
 
@@ -106,6 +135,9 @@ export function initPlayer(G) {
     vehicle: null,
     hurtCooldown: 0,
   };
+  // Jetpack: real flight state. fuel drains while thrusting (Space on foot),
+  // refills on the ground; vy is the vertical velocity (m/s).
+  G.jetpack = { fuel: 100, maxFuel: 100, active: false, owned: true, vy: 0, _smokeTimer: 0 };
 }
 
 export function updatePlayer(G, dt) {
@@ -114,6 +146,12 @@ export function updatePlayer(G, dt) {
   p.hurtCooldown = Math.max(0, (p.hurtCooldown || 0) - dt);
   if (p.mode === 'car') {
     p.mesh.visible = false;
+    if (G.jetpack) {
+      G.jetpack.active = false;
+      G.jetpack.vy = 0;
+      const f = p.mesh.userData.jetpackFlame;
+      if (f) f.visible = false;
+    }
     return;
   }
   p.mesh.visible = true;
@@ -170,13 +208,53 @@ export function updatePlayer(G, dt) {
   p.pos.z = clamp(p.pos.z, -318, 318);
   p.mesh.rotation.y = p.heading;
 
-  // Walk swing.
+  // Walk swing (legs tuck while airborne).
   const u = p.mesh.userData;
-  const swing = p.speed > 0 ? Math.sin(G.time * 10) * 0.55 : 0;
+  const airborne = p.pos.y > 0.05;
+  const swing = !airborne && p.speed > 0 ? Math.sin(G.time * 10) * 0.55 : 0;
   u.legL.rotation.x = swing;
   u.legR.rotation.x = -swing;
   u.armL.rotation.x = -swing * 0.8;
   u.armR.rotation.x = swing * 0.8;
+  if (airborne) {
+    u.legL.rotation.x = 0.35;
+    u.legR.rotation.x = 0.25;
+  }
+
+  // ---- jetpack: hold Space on foot to thrust up, WASD steers (handled
+  // above). Fuel drains while thrusting, refills on the ground. Gravity
+  // pulls Wowo back down when the thrust stops; landing is at y = 0.
+  const jp = G.jetpack;
+  const flame = u.jetpackFlame;
+  if (jp && jp.owned) {
+    const grounded = p.pos.y <= 0.001;
+    const wantThrust = Input.down('Space') && jp.fuel > 0;
+    jp.active = wantThrust;
+    if (wantThrust) {
+      jp.vy = Math.min(jp.vy + 26 * dt, 9);
+      jp.fuel = Math.max(0, jp.fuel - 26 * dt);
+      if (flame) {
+        flame.visible = true;
+        flame.scale.set(0.85 + G.rng() * 0.4, 0.9 + G.rng() * 0.5, 0.85 + G.rng() * 0.4);
+        flame.material.opacity = 0.75 + G.rng() * 0.25;
+      }
+      jp._smokeTimer -= dt;
+      if (jp._smokeTimer <= 0) {
+        jp._smokeTimer = 0.07;
+        spawnSmoke(G, p.pos.x - Math.sin(p.heading) * 0.26, p.pos.y + 0.7, p.pos.z - Math.cos(p.heading) * 0.26, 0.7);
+      }
+    } else {
+      if (flame) flame.visible = false;
+      if (grounded) jp.fuel = Math.min(jp.maxFuel, jp.fuel + 32 * dt);
+      if (!grounded || jp.vy !== 0) jp.vy -= 22 * dt;
+    }
+    jp.vy = clamp(jp.vy, -14, 9);
+    p.pos.y += jp.vy * dt;
+    if (p.pos.y <= 0) {
+      p.pos.y = 0;
+      jp.vy = 0;
+    }
+  }
 
   // Traffic strike: a fast car that clips Wowo on foot knocks him down.
   if (G.traffic && p.hurtCooldown <= 0) {

@@ -195,7 +195,18 @@ function injectHudStyle() {
 #weapon-panel .wp-hint { font: 600 9px var(--font-read); color: rgba(245,239,224,.45); letter-spacing: 1px; text-align: right; margin-top: 2px; }
 #weapon-panel .wp-sil svg { display: block; }
 .wslot.active { border-color: var(--gold); border-width: 2px; color: var(--gold); background: rgba(242,194,48,.16); }
-.wslot.active .ammo { color: var(--gold); font-weight: 700; }`;
+.wslot.active .ammo { color: var(--gold); font-weight: 700; }
+/* Progression strip (progression.js): idols, REP bar, skills, jetpack, side job.
+   Lives under the radio badge so the dense HUD layout is untouched. */
+#prog-panel { position: absolute; left: auto; right: 12px; top: 182px; width: 236px; background: var(--panel); border: 1px solid rgba(242,194,48,.55); border-radius: 6px; padding: 7px 10px; font: 600 11px var(--font-read); color: var(--ink); line-height: 1.55; z-index: 5; }
+#prog-panel .pp-row { display: flex; justify-content: space-between; gap: 6px; }
+#prog-panel .pp-gold { color: var(--gold); font-weight: 800; }
+#prog-panel .pp-bar { height: 5px; background: rgba(245,239,224,.18); border-radius: 3px; overflow: hidden; margin: 2px 0 3px; }
+#prog-panel .pp-bar i { display: block; height: 100%; background: #f2c230; }
+#prog-panel .pp-next { color: var(--muted); font-size: 10px; }
+#prog-panel .pp-skills { font-size: 10px; color: var(--muted); letter-spacing: .5px; margin-top: 2px; }
+#prog-panel .pp-jet { color: #7ec8e8; margin-top: 2px; }
+#prog-panel .pp-side { color: #8fe388; margin-top: 2px; }`;
   document.head.appendChild(st);
 }
 
@@ -426,6 +437,29 @@ export function initHUD(G) {
   el.rbName = el.radioBadge ? el.radioBadge.querySelector('.rb-name') : null;
   el.rbSub = el.radioBadge ? el.radioBadge.querySelector('.rb-sub') : null;
 
+  // Progression strip (progression.js): idols, REP bar + NEXT, skills pips,
+  // jetpack fuel (only if G.jetpack exists), active side-job line.
+  if (hud && !$('prog-panel')) {
+    const pp = document.createElement('div');
+    pp.id = 'prog-panel';
+    pp.innerHTML = '<div class="pp-row"><span>DORADA IDOLS</span><span class="pp-gold" id="pp-idols">0/20</span></div>'
+      + '<div class="pp-row"><span>REP <span class="pp-gold" id="pp-rep-lv">LV 1</span></span><span id="pp-rep-xp">0/500 XP</span></div>'
+      + '<div class="pp-bar"><i id="pp-rep-bar" style="width:0%"></i></div>'
+      + '<div class="pp-next" id="pp-rep-next"></div>'
+      + '<div class="pp-skills" id="pp-skills"></div>'
+      + '<div class="pp-jet hidden" id="pp-jet"></div>'
+      + '<div class="pp-side hidden" id="pp-side"></div>';
+    hud.appendChild(pp);
+  }
+  el.ppIdols = $('pp-idols');
+  el.ppRepLv = $('pp-rep-lv');
+  el.ppRepXp = $('pp-rep-xp');
+  el.ppRepBar = $('pp-rep-bar');
+  el.ppRepNext = $('pp-rep-next');
+  el.ppSkills = $('pp-skills');
+  el.ppJet = $('pp-jet');
+  el.ppSide = $('pp-side');
+
   // Build the 4 weapon-rack slots once from WEAPONS.
   weaponSlots = [];
   if (el.weaponRack) {
@@ -504,12 +538,16 @@ export function renderHUD(G) {
     setText(el.district, 'district', districtAt(p.pos.x, p.pos.z).name);
   }
 
-  // --- vitals ---
-  const health = Math.max(0, Math.min(100, Math.round(p.health || 0)));
+  // --- vitals (health bar scales to maxHealth: REP level-ups and Stamina
+  // pips raise the cap above 100 via progression.js) ---
+  const maxHealth = Math.max(1, p.maxHealth || 100);
+  const health = Math.max(0, Math.min(maxHealth, Math.round(p.health || 0)));
+  const healthPct = Math.max(0, Math.min(100, Math.round((health / maxHealth) * 100)));
   const armour = Math.max(0, Math.min(100, Math.round(p.armour || 0)));
-  if (last.health !== health) {
-    last.health = health;
-    if (el.healthFill) el.healthFill.style.width = `${health}%`;
+  if (last.health !== healthPct || last.healthNum !== health) {
+    last.health = healthPct;
+    last.healthNum = health;
+    if (el.healthFill) el.healthFill.style.width = `${healthPct}%`;
     if (el.healthNum) el.healthNum.textContent = String(health);
   }
   if (last.armour !== armour) {
@@ -518,18 +556,21 @@ export function renderHUD(G) {
     if (el.armourNum) el.armourNum.textContent = String(armour);
   }
 
-  // --- weapon rack ---
+  // --- weapon rack (mag/reserve when the combat build tracks them,
+  // otherwise the total ammo combat.js actually stores) ---
   const wi = (G.combat && typeof G.combat.weaponIndex === 'number') ? G.combat.weaponIndex : 0;
   weaponSlots.forEach((slot, i) => {
-    const ammo = (G.combat && G.combat.weapons && G.combat.weapons[i])
-      ? G.combat.weapons[i].ammo : WEAPONS[i].ammo;
+    const cw = (G.combat && G.combat.weapons && G.combat.weapons[i]) || null;
+    const ammo = cw ? cw.ammo : WEAPONS[i].ammo;
+    const disp = (cw && typeof cw.mag === 'number')
+      ? `${cw.mag}/${typeof cw.reserve === 'number' ? cw.reserve : 0}` : String(ammo);
     const key = `wslot${i}`;
-    const sig = `${i === wi ? 'a' : ''}|${ammo}`;
+    const sig = `${i === wi ? 'a' : ''}|${disp}`;
     if (last[key] !== sig) {
       last[key] = sig;
       slot.classList.toggle('active', i === wi);
       const ammoEl = slot.querySelector('.ammo');
-      if (ammoEl) ammoEl.textContent = String(ammo);
+      if (ammoEl) ammoEl.textContent = disp;
     }
   });
 
@@ -539,12 +580,17 @@ export function renderHUD(G) {
       ? G.combat.weapons[wi] : WEAPONS[wi];
     const wammo = (G.combat && G.combat.weapons && G.combat.weapons[wi])
       ? G.combat.weapons[wi].ammo : WEAPONS[wi].ammo;
-    const wsig = `${wi}|${wammo}`;
+    // Mag/reserve "32/160" when present; combat.js currently stores only
+    // total `ammo`, so that is what shows until a mag/reserve build lands.
+    const wdisp = (w && typeof w.mag === 'number')
+      ? `${w.mag}/${typeof w.reserve === 'number' ? w.reserve : 0}` : String(wammo);
+    const wlabel = (w && typeof w.mag === 'number') ? 'MAG' : 'AMMO';
+    const wsig = `${wi}|${wdisp}`;
     if (last.wpSig !== wsig) {
       last.wpSig = wsig;
       if (el.wpSil) el.wpSil.innerHTML = weaponSVG(w.name);
       if (el.wpName) el.wpName.textContent = String(w.name || '').toUpperCase();
-      if (el.wpAmmo) el.wpAmmo.innerHTML = `${wammo} <small>AMMO</small>`;
+      if (el.wpAmmo) el.wpAmmo.innerHTML = `${wdisp} <small>${wlabel}</small>`;
     }
   }
 
@@ -586,6 +632,53 @@ export function renderHUD(G) {
     }
   }
 
+  // --- progression strip: idols, REP bar + NEXT, skills pips, jetpack
+  // fuel (only when G.jetpack exists), active side-job objective ---
+  if (el.ppIdols && G.progression) {
+    const pr = G.progression;
+    const c = pr.collectibles || {};
+    setText(el.ppIdols, 'ppIdols', `${c.found || 0}/${c.total || 20}`);
+    const rep = pr.rep || { level: 1, xp: 0, xpNext: 500, nextUnlock: '' };
+    setText(el.ppRepLv, 'ppRepLv', `LV ${rep.level || 1}`);
+    setText(el.ppRepXp, 'ppRepXp', `${Math.floor(rep.xp || 0)}/${rep.xpNext || 500} XP`);
+    const repPct = Math.max(0, Math.min(100, Math.round(((rep.xp || 0) / (rep.xpNext || 500)) * 100)));
+    if (last.ppRepBar !== repPct) {
+      last.ppRepBar = repPct;
+      if (el.ppRepBar) el.ppRepBar.style.width = `${repPct}%`;
+    }
+    setText(el.ppRepNext, 'ppRepNext', `NEXT: ${rep.nextUnlock || ''}`);
+    const sk = pr.skills || {};
+    const pip = (n) => '●'.repeat(Math.max(0, Math.min(5, n || 0))) + '○'.repeat(5 - Math.max(0, Math.min(5, n || 0)));
+    setText(el.ppSkills, 'ppSkills',
+      `DRV ${pip(sk.driving)} AIM ${pip(sk.aim)} INF ${pip(sk.influence)} STA ${pip(sk.stamina)} STL ${pip(sk.stealth)} STR ${pip(sk.street)}`);
+  }
+  if (el.ppJet) {
+    const jp = G.jetpack;
+    const showJet = !!(jp && typeof jp.fuel === 'number' && typeof jp.maxFuel === 'number' && jp.maxFuel > 0);
+    if (last.ppJetVisible !== showJet) {
+      last.ppJetVisible = showJet;
+      el.ppJet.classList.toggle('hidden', !showJet);
+    }
+    if (showJet) {
+      const pct = Math.max(0, Math.min(100, Math.round((jp.fuel / jp.maxFuel) * 100)));
+      const blocks = Math.round(pct / 20);
+      setText(el.ppJet, 'ppJet', `JETPACK ${'█'.repeat(blocks)}${'░'.repeat(5 - blocks)} ${pct}%`);
+    }
+  }
+  if (el.ppSide) {
+    const sj = G.sideJobs && G.sideJobs.active;
+    const showSide = !!(sj && sj.name);
+    if (last.ppSideVisible !== showSide) {
+      last.ppSideVisible = showSide;
+      el.ppSide.classList.toggle('hidden', !showSide);
+    }
+    if (showSide) {
+      const timer = (typeof sj.timer === 'number' && sj.timer > 0) ? ` · ${fmtTimer(sj.timer)}` : '';
+      const payout = (typeof sj.payout === 'number') ? ` ($${sj.payout.toLocaleString('en-US')})` : '';
+      setText(el.ppSide, 'ppSide', `SIDE JOB: ${sj.name} — ${sj.objective || ''}${payout}${timer}`);
+    }
+  }
+
   // --- score popups from gameplay state (drift / near-miss / queued events) ---
   pollScoreEvents(G);
 
@@ -614,12 +707,28 @@ export function renderHUD(G) {
         if (dx * dx + dz * dz <= 25) { mode = 'steal'; break; }
       }
       if (mode === 'none' && !Input.pointerLocked && !G.shotMode) mode = 'aim';
+      // Ownable property nearby: E is consumed by player.js (car steal),
+      // so buying happens from the map (M) — the prompt says so.
+      if ((mode === 'aim' || mode === 'none') && G.progression && Array.isArray(G.progression.properties) && p.pos) {
+        for (const prop of G.progression.properties) {
+          if (prop.owned) continue;
+          const dx = prop.x - p.pos.x;
+          const dz = prop.z - p.pos.z;
+          if (dx * dx + dz * dz <= 36) { mode = 'property'; last.propId = prop.id; break; }
+        }
+      }
     }
     if (last.prompt !== mode) {
       last.prompt = mode;
       el.prompt.classList.toggle('hidden', mode === 'none');
-      el.prompt.textContent = mode === 'steal' ? 'E — STEAL CAR'
-        : mode === 'aim' ? 'CLICK TO AIM WITH MOUSE' : '';
+      let text = '';
+      if (mode === 'steal') text = 'E — STEAL CAR';
+      else if (mode === 'aim') text = 'CLICK TO AIM WITH MOUSE';
+      else if (mode === 'property') {
+        const prop = G.progression.properties.find((x) => x.id === last.propId);
+        text = prop ? `PROPERTY NEARBY — OPEN MAP (M) TO BUY ${prop.name.toUpperCase()} $${prop.price.toLocaleString('en-US')}` : '';
+      }
+      el.prompt.textContent = text;
     }
   }
 

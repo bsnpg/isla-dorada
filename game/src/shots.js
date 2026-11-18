@@ -21,10 +21,11 @@ import { renderHUD, showDialogue, pushScorePopup } from './hud.js';
 import { renderMinimap } from './minimap.js';
 import { setWanted, spawnPoliceCar, spawnHeli } from './police.js';
 import { spawnTrafficCar, spawnPed } from './traffic.js';
-import { spawnEnemy, spawnDownedEnemy } from './combat.js';
+import { spawnEnemy, spawnDownedEnemy, explodeAt, setJetpack, spawnDamageNumber } from './combat.js';
 import { dropCash, dropWeapon } from './drops.js';
+import { xpNextFor, nextUnlockFor, recomputeEffects } from './progression.js';
 import { startMission } from './missions.js';
-import { makeCar } from './driving.js';
+import { makeCar, spawnSmoke } from './driving.js';
 import { drawMap } from './map.js';
 import { saveGame } from './save.js';
 
@@ -282,12 +283,16 @@ function stageChase(G) {
   // V3-1: the flipped unit is the CENTRE of the cover — caught mid-flip in
   // the air directly ahead of the GT (not a background wreck).
   const flipped = flipPoliceCar(G, PX - 8, PZ + 1.5, H + 0.5, { y: 2.2, pitch: 0.35, roll: Math.PI * 0.65 });
+  // V3 density: a SECOND flipped unit mid-tumble ahead-right, also airborne
+  // and burning — the street reads as a pile-up, not a single stunt.
+  const flipped2 = flipPoliceCar(G, PX - 26, PZ - 3.5, H + 0.4, { y: 1.8, pitch: 0.5, roll: Math.PI * 0.7 });
   const block = spawnPoliceCar(G, PX - 52, PZ - 1.5, -H);
   block.status = 'ROADBLOCK';
   const heli = spawnHeli(G, PX - 34, PZ - 16, 12); // V3-5: lower, searchlight cone in frame
   G.police.units = [
     { name: 'UNIT 23', dist: 4, status: 'RAMMING', mesh: ram.mesh },
     { name: 'UNIT 12', dist: 8, status: 'FLIPPED', mesh: flipped.mesh },
+    { name: 'UNIT 41', dist: 26, status: 'FLIPPED', mesh: flipped2.mesh },
     { name: 'UNIT 07', dist: 52, status: 'ROADBLOCK', mesh: block.mesh },
     { name: 'HAWK-1', dist: 38, status: 'SEARCHLIGHT', mesh: heli.mesh },
     { name: 'UNIT 31', dist: 210, status: 'PURSUIT', mesh: null },
@@ -317,11 +322,33 @@ function stageChase(G) {
   // V3-4: one oncoming car + one ped close to the camera so the street reads alive.
   const t4 = spawnTrafficCar(G, PX - 16, PZ - 6, -H, 'Solano S');
   brightenCar(G, t4);
+  // V3 density: fuller street — another westbound car past the roadblock,
+  // another oncoming car far ahead, and a car crossing the x=-200 junction
+  // so the cross street reads alive too.
+  const t5 = spawnTrafficCar(G, PX - 108, PZ, H, 'Palma Cruiser');
+  const t6 = spawnTrafficCar(G, PX - 120, PZ, -H, 'Solano S');
+  const t7 = spawnTrafficCar(G, -200, -240, 0, 'Cayo Coupe');
+  brightenCar(G, t5);
+  brightenCar(G, t6);
+  brightenCar(G, t7);
   spawnPed(G, PX - 14, PZ + 8);
   spawnPed(G, PX - 22, PZ - 8);
   spawnPed(G, PX - 44, PZ + 8);
   spawnPed(G, PX - 58, PZ - 8);
   spawnPed(G, PX - 10, PZ + 8);
+  // V3 density: more peds on both sidewalks down the whole visible street.
+  spawnPed(G, PX - 30, PZ + 8);
+  spawnPed(G, PX - 36, PZ - 8);
+  spawnPed(G, PX - 50, PZ + 8);
+  spawnPed(G, PX - 70, PZ - 8);
+  spawnPed(G, PX - 88, PZ + 8);
+  spawnPed(G, PX - 6, PZ - 8);
+
+  // V3 density: a second downed officer on the south shoulder with his own
+  // loot — the flipped units threw two men out, not one.
+  spawnDownedEnemy(G, PX - 18, PZ + 7.6, 'heavy');
+  dropCash(G, PX - 16, PZ + 7.0, 350);
+  dropWeapon(G, PX - 20.5, PZ + 7.2, 3); // Rifle +30
 
   // Mission 4, stage 2, timer 2:06 — the long Causeway chase.
   startMission(G, 3);
@@ -376,6 +403,14 @@ function stageTitle(G) {
 }
 
 // ---------------------------------------------------------------- combat
+// V3 MONEY SHOT — jetpack + bazooka, one frame, three systems at once:
+// Wowo ON the jetpack mid-air firing the bazooka; a REAL explosion frozen
+// mid-blast (explodeAt: fireball + smoke column + shockwave ring + debris +
+// scorch); a CAR thrown through the air by the blast; a BODY frozen mid-air
+// at the peak of the blast; drops scattered below. Order matters because
+// the shot is frozen: explodeAt runs FIRST (before any enemy/car is placed
+// in its radius, so nothing gets teleported or flipped by it afterwards),
+// then every staged object is posed directly on its mesh.
 function stageCombat(G) {
   G.setMode('play');
   const w = G.city.landmarks.warehouse;
@@ -396,15 +431,110 @@ function stageCombat(G) {
   G.missions.stage = 1;
   G.missions.stageCount = 3;
   G.missions.timer = 0;
-  G.combat.weaponIndex = 1;
-  G.combat.weapons[1].ammo = 120;
+  // Bazooka is weapon slot 5 (index 4): 1 in the mag, 12 in reserve.
+  G.combat.weaponIndex = 4;
+  G.combat.weapons[4].mag = 1;
+  G.combat.weapons[4].reserve = 12;
+  // The staged save owns nitro — the speedometer must never read
+  // "NITRO — NOT INSTALLED" in this shot (same as the chase staging).
+  if (!G.garage) G.garage = { owned: {} };
+  if (!G.garage.owned) G.garage.owned = {};
+  G.garage.owned.nitro = 1;
 
-  // Enemies CLOSE (8-16 m, inside the frame): two gunmen firing, one heavy
-  // centre, one DOWNED gunman flat on the ground near the camera.
   const THREE = G.three;
-  const e1p = offsetFrom(PX, PZ, H, 12, 4.5);
-  const e2p = offsetFrom(PX, PZ, H, 13, -6.5);
-  const e3p = offsetFrom(PX, PZ, H, 17, 0.5);
+  // Wowo ON the jetpack, mid-air: setJetpack lights the flame and lifts
+  // him to 2.5 m; raise him further so he reads clearly above the blast
+  // (and above the dialogue box, which covers the bottom-centre of frame),
+  // and grow the jetpack flame so the thrust reads at a glance.
+  setJetpack(G, true);
+  G.player.pos.y = 5.0;
+  const jpFlame = G.player.mesh && G.player.mesh.userData
+    ? G.player.mesh.userData.jetpackFlame : null;
+  if (jpFlame) jpFlame.scale.setScalar(1.8);
+  // Jetpack smoke trail below Wowo — the rising puffs are what sells
+  // "he flew up here" at a glance (kept >8 m from the blast point so the
+  // smoke-dimming below never touches them).
+  spawnSmoke(G, PX, 4.2, PZ, 1.2);
+  spawnSmoke(G, PX, 3.2, PZ, 1.0);
+  spawnSmoke(G, PX, 2.2, PZ, 0.9);
+  // Warm key light on Wowo from the CAMERA side (behind-above him): he
+  // faces away from the western sun, so his front reads near-black without
+  // it — the light lifts his jacket, skin and the jetpack tanks out of the
+  // dark sunset sky. Placed toward the camera so his BACK (tanks + flame,
+  // what the camera sees) is lit, not just his front.
+  const wowoLight = new THREE.PointLight(0xffc27a, 150, 16, 1.6);
+  wowoLight.position.set(PX - Math.sin(H) * 3, 7, PZ - Math.cos(H) * 3);
+  G.scene.add(wowoLight);
+
+  // --- the blast itself, 14 m ahead of Wowo, dead centre of the frame ---
+  const bp = offsetFrom(PX, PZ, H, 14, 0);
+  explodeAt(G, bp.x, 1.5, bp.z, 14);
+  // The stock fireball is ~5 m across — scale it up slightly so the blast
+  // reads IMPACTFUL, not a small orange flash, and add two tall basic-
+  // material flame columns (MeshBasic orange reads vivid at sunset; the
+  // standard-material fireball alone blows out to cream under the sun, so
+  // its emissive is cooled to 1.0 to keep it orange instead of white-hot).
+  // explodeAt also throws white smoke sprites over the blast — dim the ones
+  // at the blast point, or their white wash turns the fireball cream.
+  for (const ex of G.combat._explosions) {
+    if (ex.kind === 'fireball' && ex.group) {
+      ex.group.scale.setScalar(1.15);
+      for (const m of ex.mats || []) m.emissiveIntensity = 1.0;
+    }
+  }
+  if (G.driving && G.driving.fx && Array.isArray(G.driving.fx.smoke)) {
+    for (const s of G.driving.fx.smoke) {
+      if (!s.sprite || !s.sprite.visible) continue;
+      const p = s.sprite.position;
+      if (Math.hypot(p.x - bp.x, p.z - bp.z) < 8 && s.sprite.material) {
+        s.sprite.material.opacity = 0.12;
+      }
+    }
+  }
+  addFire(G, bp.x, bp.z, 2.6);
+  addFire(G, bp.x - 2, bp.z + 1.5, 1.8);
+  spawnDamageNumber(G, bp.x, 5.5, bp.z, '-220', '#ff8a3a');
+
+  // --- a CAR thrown through the air by the blast (posed directly) ---
+  // Heading-relative placement (offsetFrom): 14 m screen-RIGHT of the blast
+  // core so it clears the fireball instead of hiding inside/behind it (the
+  // old raw x/z offset landed it at the fireball's right edge, unreadable).
+  // A yellow Marina Taxi, so the flying car reads at a glance instead of
+  // vanishing into the dark buildings like a dark coupe did. Raised to 5.5 m
+  // so it is clearly ABOVE the ground, tumbling, nose-down, mid-air.
+  const taxiP = offsetFrom(bp.x, bp.z, H, 2, 14);
+  const thrown = makeCar(G, 'Marina Taxi', taxiP.x, taxiP.z, H + 0.9);
+  brightenCar(G, thrown);
+  thrown.mesh.position.y = 5.5;
+  thrown.mesh.rotation.set(0.5, H + 0.9, 1.1); // tumbling, nose-down, mid-air
+  addFire(G, taxiP.x, taxiP.z, 0.9);
+
+  // --- a BODY frozen mid-air at the peak of the blast ---
+  // A heavy (1.25x bulk, bigger silhouette), 13 m screen-LEFT of the blast
+  // core (heading-relative, so it clears the fireball on the other side from
+  // the taxi) and raised to 6.0 m so it silhouettes against the SKY, not the
+  // orange fireball. Bright IDPD-blue uniform (cloned material, so no other
+  // heavy is recolored) so the tumbling figure reads at a glance.
+  const flyP = offsetFrom(bp.x, bp.z, H, 3, -13);
+  const flyer = spawnEnemy(G, flyP.x, flyP.z, 'heavy');
+  flyer.mesh.position.y = 6.0;
+  flyer.mesh.rotation.set(-0.9, 1.2, 0.7); // thrown flat, tumbling
+  flyer.mesh.traverse((o) => {
+    const m = o.material;
+    if (m && m.color && m.color.getHex() === 0x5a5f66) {
+      o.material = m.clone();
+      o.material.color.setHex(0x4f8ff7);
+      o.material.emissive.setHex(0x1a3a6a);
+      o.material.emissiveIntensity = 1;
+    }
+  });
+
+  // Enemies CLOSE (8-19 m, inside the frame): two gunmen firing, one heavy
+  // centre behind the blast, one DOWNED gunman flat on the ground near the
+  // camera.
+  const e1p = offsetFrom(PX, PZ, H, 11, 7.5);
+  const e2p = offsetFrom(PX, PZ, H, 12, -8);
+  const e3p = offsetFrom(PX, PZ, H, 19, 1.5);
   const downP = offsetFrom(PX, PZ, H, 8, -2.5);
   const e1 = spawnEnemy(G, e1p.x, e1p.z, 'gunman');
   const e2 = spawnEnemy(G, e2p.x, e2p.z, 'gunman');
@@ -420,35 +550,100 @@ function stageCombat(G) {
   // a floating "PISTOL +24" label, both glowing so they read in the frame.
   dropCash(G, downP.x + 1.4, downP.z + 1.2, 250);
   dropWeapon(G, downP.x - 1.2, downP.z + 1.8, 0); // Pistol +24
-  pushScorePopup(G, '+$250', 'cash', 'CASH PICKED UP');
+  // (No +$250 popup here — the centre stack stays two lines so it never
+  // covers the blast; the cash stack itself carries the $250 label.)
+
+  // Blast loot scattered BELOW the explosion: cash + weapons with labels,
+  // spread WIDE with heading-relative offsets so the labels never stack on
+  // each other (the old tight cluster overlapped "RIFLE +30" and "$250").
+  const d1 = offsetFrom(bp.x, bp.z, H, 4, 6);
+  dropCash(G, d1.x, d1.z, 350);
+  const d2 = offsetFrom(bp.x, bp.z, H, 5, -6);
+  dropWeapon(G, d2.x, d2.z, 3); // Rifle +30
+  const d3 = offsetFrom(bp.x, bp.z, H, -2, -8);
+  dropCash(G, d3.x, d3.z, 250);
+  const d4 = offsetFrom(bp.x, bp.z, H, -1, 8);
+  dropWeapon(G, d4.x, d4.z, 1); // SMG +30
 
   // A burning pickup on the right flank, flames + smoke in frame.
-  const burnP = offsetFrom(PX, PZ, H, 14, 8);
+  const burnP = offsetFrom(PX, PZ, H, 14, 9);
   const pickup = makeCar(G, 'Faro Pickup', burnP.x, burnP.z, H + 0.5);
   brightenCar(G, pickup);
   igniteCar(G, pickup, 1.1);
 
   // Live fire, frozen mid-burst: muzzle flashes + tracers from both gunmen
-  // toward the player, and one tracer OUT from the player into the heavy —
-  // with damage numbers as score popups.
-  const pPos = new THREE.Vector3(PX, 0, PZ);
+  // toward the player, and the BAZOOKA shot itself — a bright tracer from
+  // Wowo's gun to the heart of the blast, plus a rocket frozen mid-flight
+  // halfway there.
+  const pPos = new THREE.Vector3(PX, 5.0, PZ);
   for (const e of [e1, e2]) {
     const from = new THREE.Vector3(e.pos.x, 1.35, e.pos.z);
-    const to = new THREE.Vector3(pPos.x + (G.rng() - 0.5) * 1.2, 1.3, pPos.z + (G.rng() - 0.5) * 1.2);
+    const to = new THREE.Vector3(pPos.x + (G.rng() - 0.5) * 1.2, 5.0, pPos.z + (G.rng() - 0.5) * 1.2);
     fireBurst(G, from, to);
   }
   const gunFrom = new THREE.Vector3(
-    pPos.x + Math.sin(H) * 0.6, 1.4, pPos.z + Math.cos(H) * 0.6,
+    pPos.x + Math.sin(H) * 0.6, 6.0, pPos.z + Math.cos(H) * 0.6,
   );
-  fireBurst(G, gunFrom, new THREE.Vector3(e3.pos.x, 1.2, e3.pos.z));
+  const blastTop = new THREE.Vector3(bp.x, 2.5, bp.z);
+  fireBurst(G, gunFrom, blastTop);
+  // Rocket mid-flight: dark tube + orange nose + flame cone, halfway down
+  // the gun-to-blast line, nose-first toward the explosion.
+  const rocket = new THREE.Group();
+  const rBody = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09, 0.09, 0.85, 10),
+    new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.4, metalness: 0.7 }),
+  );
+  rBody.rotation.x = Math.PI / 2;
+  rocket.add(rBody);
+  const rNose = new THREE.Mesh(
+    new THREE.ConeGeometry(0.09, 0.3, 10),
+    new THREE.MeshStandardMaterial({ color: 0xd86a20, roughness: 0.5 }),
+  );
+  rNose.rotation.x = Math.PI / 2;
+  rNose.position.z = 0.57;
+  rocket.add(rNose);
+  const rFlame = new THREE.Mesh(
+    new THREE.ConeGeometry(0.14, 0.6, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffa030, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }),
+  );
+  rFlame.rotation.x = -Math.PI / 2;
+  rFlame.position.z = -0.7;
+  rocket.add(rFlame);
+  const mid = gunFrom.clone().lerp(blastTop, 0.45);
+  rocket.position.copy(mid);
+  rocket.lookAt(blastTop.x, blastTop.y, blastTop.z);
+  rocket.scale.setScalar(1.5); // read at 20+ m, not a speck
+  G.scene.add(rocket);
 
   showDialogue(G, 'WOWO', 'Three of them. The cache is behind that wall. Move.', 60000);
-  pushScorePopup(G, '-55', 'damage', 'HEAVY HIT');
+  pushScorePopup(G, '-220', 'damage', 'BAZOOKA HIT');
   pushScorePopup(G, '-34', 'damage', 'GUNMAN DOWN');
-  // Camera close behind the player, shifted to the player's right so the
-  // player steps left of the centre HUD column: enemies, tracers, the downed
-  // man and the burning pickup all in frame, the player clear of the gauge.
-  placeChaseCamera(G, G.player.pos, H, 7, 3.1, 0, 0, 64, 2.5);
+  const banner = document.createElement('div');
+  banner.id = 'mission-passed-banner';
+  banner.style.cssText = 'position:absolute;left:59%;top:5%;transform:translateX(-50%);text-align:center;'
+    + 'background:rgba(10,14,22,0.88);border:2px solid #f2c230;border-radius:8px;'
+    + 'padding:10px 28px;z-index:7;pointer-events:none;'
+    + 'font-family:system-ui,sans-serif;color:#f5efe0;';
+  banner.innerHTML = '<div style="font:800 26px system-ui,sans-serif;color:#f2c230;letter-spacing:3px;">★ MISSION PASSED ★</div>'
+    + '<div style="font:700 15px system-ui,sans-serif;margin-top:4px;">JOB 5 — GUDANG SENJATA</div>'
+    + '<div style="font:800 16px ui-monospace,Menlo,monospace;color:#8fe388;margin-top:4px;">+$4,500 &nbsp;·&nbsp; +500 REP</div>'
+    + '<div style="font:700 13px system-ui,sans-serif;color:#7ec8e8;margin-top:3px;">UNLOCKED: JOB 6 — KONFRONTASI</div>';
+  const hudEl = document.getElementById('hud');
+  if (hudEl) hudEl.appendChild(banner);
+  // Camera: LOW, looking UP at Wowo — the previous angles put him dead
+  // against the fireball / ground, where a dark upright figure reads as
+  // "standing". From below, he silhouettes against the orange SKY in the
+  // upper-left of frame, the jetpack flame and smoke trail hanging below
+  // him, while the blast sits centre-right. Height -3 puts the camera at
+  // y≈2, looking up. Aim AT the blast (not the midpoint): that pushes Wowo
+  // left, clear of the MISSION PASSED banner that covered him before.
+  // Dist 6 keeps him large (~140 px) instead of a thin dark speck; aim
+  // y 5.0 so his head clears the top edge (dist 5 cut him off).
+  placeChaseCamera(G, G.player.pos, H, 6, -3.0, 0, 0, 64, 4);
+  G.camera.lookAt(bp.x, 5.0, bp.z);
+  G.camera.updateProjectionMatrix();
+  const popLayer = document.getElementById('score-popups');
+  if (popLayer) popLayer.style.top = '20%';
   renderHUD(G);
   renderMinimap(G);
 }
@@ -465,8 +660,57 @@ function stageMap(G) {
   G.player.pos.set(40, 0, 200);
   G.player.heading = Math.PI;
   startMission(G, 5);
+  // V3: stage real progression state so the map's new panels read at a
+  // glance instead of showing fresh-save zeros — 7/20 idols, REP LV 3,
+  // skills with pips, one property owned, garage upgrades installed — and
+  // a real car, so the GARAGE section names one instead of "NO CAR".
+  const car = makeCar(G, 'Aurea GT', 52, 212, Math.PI);
+  brightenCar(G, car);
+  G.driving.car = car;
+  if (!G.garage) G.garage = { owned: {} };
+  if (!G.garage.owned) G.garage.owned = {};
+  G.garage.owned.engine = 2;
+  G.garage.owned.armor = 1;
+  G.garage.owned.nitro = 1;
+  G.garage.owned.paint = 1;
+  const pr = G.progression;
+  if (pr) {
+    pr.collectibles.found = 7;
+    pr.idols.slice(0, 7).forEach((idol) => {
+      idol.collected = true;
+      if (idol.mesh) G.scene.remove(idol.mesh);
+    });
+    pr.rep.level = 3;
+    pr.rep.xp = 850;
+    pr.rep.xpNext = xpNextFor(3);
+    pr.rep.nextUnlock = nextUnlockFor(3);
+    pr.skills = { driving: 3, aim: 2, influence: 1, stamina: 2, stealth: 1, street: 2 };
+    if (pr.properties && pr.properties[0]) pr.properties[0].owned = true;
+    recomputeEffects(G);
+  }
   G.setMode('map');
   drawMap(G);
+  // The side-job legend entries (TAXI STAND / DELIVERY PICKUP / STREET
+  // RACE) load via a dynamic import in map.js and nothing re-draws the
+  // legend once it resolves — force one more drawMap after the import so
+  // the entries are in the frame before the screenshot (~600 ms later).
+  import('./sidejobs.js').then(() => drawMap(G)).catch(() => {});
+  // V3: the side panel is ~1,450 px tall in one column — centred in a
+  // 720 px frame, CURRENT JOB is cut off the top and GARAGE off the bottom.
+  // Staging-only reflow (live game untouched): two columns, so every panel
+  // — CURRENT JOB, checklist, stats, legend, progression, garage — fits
+  // in the one screenshot frame.
+  const side = document.getElementById('map-side');
+  if (side) {
+    side.style.width = '600px';
+    side.style.columnCount = '2';
+    side.style.columnGap = '14px';
+    // Both columns run ~730 px tall; scale the whole panel to 0.87 so it
+    // fits the 720 px frame top-to-bottom (text stays ~11 px, still legible).
+    side.style.transform = 'scale(0.87)';
+    side.style.transformOrigin = 'center center';
+    for (const child of side.children) child.style.breakInside = 'avoid';
+  }
 }
 
 // Set `G` to the named scene. Any unknown name stages the chase (the cover).
