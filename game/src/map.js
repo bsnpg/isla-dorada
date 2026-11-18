@@ -11,6 +11,7 @@ import { Input } from './input.js';
 let canvas = null;
 let ctx = null;
 let checklistEl = null;
+let currentJobEl = null;
 let statsEl = null;
 let legendEl = null;
 let currentRoads = null;
@@ -131,8 +132,47 @@ function refreshChecklist(G) {
   checklistEl.innerHTML = MISSIONS.map((m, i) => {
     const cls = (i < idx || i < done) ? 'done' : (i === idx ? 'current' : '');
     const mark = (i < idx || i < done) ? '✓ ' : (i === idx ? '▶ ' : '· ');
-    return `<li class="${cls}">${mark}JOB ${i + 1} — ${m.name}</li>`;
+    // Payout: the same formula missions.js pays on completion
+    // (2000 + 500 * (index + 1)) — read from the formula, never hardcoded.
+    const pay = (2000 + 500 * (i + 1)).toLocaleString('en-US');
+    return `<li class="${cls}">${mark}JOB ${i + 1} — ${m.name} <span class="pay">$${pay}</span></li>`;
   }).join('');
+}
+
+// CURRENT JOB panel (HTML, in #map-side): the job in progress, from live G —
+// name + stage objective + stage + GPS distance + payout. Same data the HUD
+// mission panel and the minimap already show; the map now shows it too, the
+// way Halcyon's map shows its CURRENT JOB panel.
+function refreshCurrentJob(G) {
+  if (!currentJobEl) return;
+  const m = G.missions;
+  const idx = (m && typeof m.index === 'number') ? m.index : 0;
+  if (idx >= MISSIONS.length) {
+    currentJobEl.innerHTML =
+      `<h3>CURRENT JOB</h3>` +
+      `<div class="cj-name">ALL JOBS DONE</div>` +
+      `<div class="cj-obj">Isla Dorada is yours, Wowo.</div>` +
+      `<div class="cj-meta">8 / 8 COMPLETE</div>`;
+    return;
+  }
+  const def = MISSIONS[idx];
+  const stage = (m && typeof m.stage === 'number') ? m.stage : 1;
+  const stageCount = (m && typeof m.stageCount === 'number') ? m.stageCount : 3;
+  const objective = (m && m.objective) || def.objective || '';
+  const pay = (2000 + 500 * (idx + 1)).toLocaleString('en-US');
+  // GPS distance to the mission marker — the same formula the minimap uses.
+  let gps = '';
+  const marker = (m && m.marker) ? posOf(m.marker) : null;
+  const player = (G.player && G.player.pos) ? { x: G.player.pos.x, z: G.player.pos.z } : null;
+  if (marker && player) {
+    const d = Math.round(Math.hypot(marker.x - player.x, marker.z - player.z));
+    gps = ` · GPS ${d} m`;
+  }
+  currentJobEl.innerHTML =
+    `<h3>CURRENT JOB</h3>` +
+    `<div class="cj-name">JOB ${idx + 1} — ${def.name}</div>` +
+    `<div class="cj-obj">${objective}</div>` +
+    `<div class="cj-meta">STAGE ${stage}/${stageCount}${gps} · PAYOUT $${pay}</div>`;
 }
 
 function refreshStats(G) {
@@ -165,6 +205,7 @@ export function initMap(G) {
   canvas = document.getElementById('map-canvas');
   ctx = canvas ? canvas.getContext('2d') : null;
   checklistEl = document.getElementById('map-checklist');
+  currentJobEl = document.getElementById('map-current-job');
   statsEl = document.getElementById('map-stats');
   legendEl = document.getElementById('map-legend');
   const btn = document.getElementById('btn-close-map');
@@ -455,6 +496,7 @@ export function drawMap(G) {
 
   currentRoads = null;
   refreshChecklist(G);
+  refreshCurrentJob(G);
   refreshStats(G);
   refreshLegend(G);
 }

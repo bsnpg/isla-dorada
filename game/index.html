@@ -90,12 +90,18 @@
   #map-canvas { border: 2px solid rgba(242,194,48,.6); border-radius: 8px; background: #10141f; }
   #map-side { width: 340px; }
   #map-side h3 { margin: 0 0 8px; color: var(--gold); letter-spacing: 1px; }
-  #map-checklist { list-style: none; margin: 0; padding: 0; font-size: 14px; line-height: 1.8; }
+  #map-checklist { list-style: none; margin: 0; padding: 0; font-size: 14px; line-height: 1.7; }
   #map-checklist li.done { color: var(--green); text-decoration: line-through; }
   #map-checklist li.current { color: var(--gold); font-weight: 800; }
-  #map-stats { margin-top: 10px; font: 600 13px var(--font-read); color: var(--muted); line-height: 1.7; }
+  #map-checklist .pay { color: var(--green); font-weight: 700; }
+  #map-current-job { margin: 0 0 6px; background: var(--panel); border: 1px solid rgba(242,194,48,.5); border-radius: 6px; padding: 6px 10px; }
+  #map-current-job h3 { margin: 0 0 1px; color: var(--gold); letter-spacing: 1px; font-size: 12px; }
+  #map-current-job .cj-name { color: var(--gold); font-weight: 800; font-size: 15px; }
+  #map-current-job .cj-obj { font: 600 13px var(--font-read); color: var(--muted); line-height: 1.5; }
+  #map-current-job .cj-meta { font: 700 12px var(--font-read); color: var(--ink); margin-top: 2px; }
+  #map-stats { margin-top: 6px; font: 600 13px var(--font-read); color: var(--muted); line-height: 1.7; }
   #map-stats b { color: var(--ink); }
-  #map-legend { margin-top: 10px; }
+  #map-legend { margin-top: 6px; }
   #map-legend h3 { margin: 0 0 6px; color: var(--gold); letter-spacing: 1px; }
   .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font: 600 12px var(--font-read); color: var(--muted); line-height: 1.5; }
   .legend-grid b { color: var(--ink); }
@@ -187,6 +193,7 @@
   <canvas id="map-canvas" width="640" height="640"></canvas>
   <div id="map-side">
     <h3>ISLA DORADA — CITY MAP</h3>
+    <div id="map-current-job"></div>
     <ul id="map-checklist"></ul>
     <div id="map-stats"></div>
     <div id="map-legend"></div>
