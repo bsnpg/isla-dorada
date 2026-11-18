@@ -92,7 +92,8 @@ function drawDiamond(c, x, y, r, color) {
 // the legend is built from this same table, so it can never point at a
 // place that does not exist. Shapes: dot = gold circle, star = casino,
 // square = gas station, diamond = restaurant.
-const POIS = [
+// Exported: the minimap draws the same table, so it can never drift.
+export const POIS = [
   ['casino', 'CASINO DORADA', 'star', '#f2c230'],
   ['station', 'IDPD STATION', 'dot', '#f2c230'],
   ['marina', 'MARINA', 'dot', '#f2c230'],
@@ -109,8 +110,8 @@ const POIS = [
 // Where each of the 8 story jobs lives (stage 1 of missions.js — the job's
 // home location). Several jobs share a place, so the badges are drawn as a
 // row above the spot. States come from live G: done = green, current =
-// gold, next = cream.
-const JOB_SPOTS = {
+// gold, next = cream. Exported: the minimap draws the same badges.
+export const JOB_SPOTS = {
   casino: [1],
   marina: [2, 6],
   impound: [3],
@@ -119,9 +120,9 @@ const JOB_SPOTS = {
   station: [7],
 };
 
-const JOB_DONE = '#58b368';
-const JOB_CURRENT = '#f2c230';
-const JOB_NEXT = '#f5efe0';
+export const JOB_DONE = '#58b368';
+export const JOB_CURRENT = '#f2c230';
+export const JOB_NEXT = '#f5efe0';
 
 function refreshChecklist(G) {
   if (!checklistEl) return;
