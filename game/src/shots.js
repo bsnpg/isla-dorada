@@ -255,7 +255,10 @@ function flipPoliceCar(G, x, z, heading, air) {
 // the pose persists exactly — updateTraffic never runs to overwrite it.
 // `heading` is the run direction (0=south/+z, PI/2=east/+x, -PI/2=west/-x,
 // PI=north/-z). `panic` throws both arms up instead of pumping them.
-function poseRunPed(ped, heading, panic) {
+// `sprint` is the wider, harder-leaning stride for the CLOSEST figures —
+// the standard pose is subtle at 30 px, and the foreground runners have
+// to read as sprinting in 2 seconds, not strolling.
+function poseRunPed(ped, heading, panic, sprint) {
   if (!ped || !ped.mesh) return ped;
   const u = ped.mesh.userData;
   if (panic) {
@@ -263,16 +266,230 @@ function poseRunPed(ped, heading, panic) {
     if (u.armR) u.armR.rotation.x = -2.6;
     if (u.legL) u.legL.rotation.x = 0.6;
     if (u.legR) u.legR.rotation.x = -0.6;
+  } else if (sprint) {
+    if (u.legL) u.legL.rotation.x = 1.05;
+    if (u.legR) u.legR.rotation.x = -1.05;
+    if (u.armL) u.armL.rotation.x = -0.9;
+    if (u.armR) u.armR.rotation.x = 0.9;
   } else {
     if (u.legL) u.legL.rotation.x = 0.85;
     if (u.legR) u.legR.rotation.x = -0.85;
     if (u.armL) u.armL.rotation.x = -0.75;
     if (u.armR) u.armR.rotation.x = 0.75;
   }
-  ped.mesh.rotation.x = 0.10; // forward lean
+  ped.mesh.rotation.x = sprint ? 0.16 : 0.10; // forward lean
   ped.mesh.rotation.y = heading;
-  ped.mesh.position.y = 0.10; // airborne mid-stride
+  ped.mesh.position.y = sprint ? 0.14 : 0.10; // airborne mid-stride
   return ped;
+}
+
+// V4 staging (recording #16), round 5 — DAY/NIGHT AS CLOCK-DRIVEN PRESETS.
+// A full live day/night cycle in game code would need edits to sky.js /
+// main.js, which are PRE-cut files (the dossier has 37 bytes of headroom),
+// so the day/night system lives here as staging presets driven by the
+// shot's clock: each stageShot sets G.stats.playSeconds to the matching
+// time AND applies the matching sky preset, so clock and lighting are
+// always consistent. This is NOT a live advancing cycle in the game code.
+// Modes: morning 06:00-11:59 (soft golden), afternoon 12:00-16:59 (bright
+// blue), evening 17:00-19:59 (orange sunset = the locked cover formula),
+// night 20:00-05:59 (dark + moon + street lights).
+function restageSky(G, mode) {
+  const THREE = G.three;
+  const sky = G.sky || {};
+  let dome = null, hemi = null, fill = null;
+  G.scene.traverse((o) => {
+    if (o.material && o.material.isShaderMaterial && o.material.uniforms
+      && o.material.uniforms.top && o.material.uniforms.low) dome = o;
+    if (o.isHemisphereLight) hemi = o;
+    if (o.isDirectionalLight && o !== sky.sunLight) fill = o;
+  });
+  const setDome = (top, upper, mid, low) => {
+    if (!dome) return;
+    const u = dome.material.uniforms;
+    u.top.value.set(top); u.upper.value.set(upper);
+    u.mid.value.set(mid); u.low.value.set(low);
+  };
+  const setHemi = (s, g, i) => { if (hemi) { hemi.color.setHex(s); hemi.groundColor.setHex(g); hemi.intensity = i; } };
+  const setFill = (c, i) => { if (fill) { fill.color.setHex(c); fill.intensity = i; } };
+  const setSunLight = (x, y, z, c, i) => {
+    const s = sky.sunLight;
+    if (s) { s.position.set(x, y, z); s.color.setHex(c); s.intensity = i; }
+  };
+  const setFog = (c) => { if (G.scene.fog) G.scene.fog.color.setHex(c); };
+  const setClouds = (op) => {
+    if (sky.clouds) for (const cl of sky.clouds) if (cl.material) cl.material.opacity = op;
+  };
+  const hideSunParts = () => {
+    for (const p of [sky.sun, sky.sunCore, sky.glow, sky.streak]) if (p) p.visible = false;
+    if (sky.flareDots) for (const d of sky.flareDots) d.visible = false;
+  };
+  const placeSun = (x, y, z, coreHex, discHex, glowHex, glowScale) => {
+    if (sky.sun) { sky.sun.visible = true; sky.sun.position.set(x, y, z); sky.sun.lookAt(0, 40, 0); sky.sun.material.color.setHex(discHex); }
+    if (sky.sunCore) { sky.sunCore.visible = true; sky.sunCore.position.set(x, y, z); sky.sunCore.lookAt(0, 40, 0); sky.sunCore.material.color.setHex(coreHex); }
+    if (sky.glow) { sky.glow.visible = true; sky.glow.position.set(x, y, z); sky.glow.material.color.setHex(glowHex); sky.glow.scale.set(glowScale, glowScale, 1); }
+    if (sky.streak) sky.streak.visible = false;
+    if (sky.flareDots) for (const d of sky.flareDots) d.visible = false;
+  };
+  const moon = () => {
+    let m = G.scene.getObjectByName('v4-moon');
+    if (!m) {
+      m = new THREE.Mesh(new THREE.CircleGeometry(26, 24),
+        new THREE.MeshBasicMaterial({ color: 0xf0f0e8, fog: false }));
+      m.name = 'v4-moon';
+      G.scene.add(m);
+    }
+    m.visible = true;
+    m.position.set(180, 180, -80); // high north, in the combat frame's sky
+    m.lookAt(0, 40, 0);
+    return m;
+  };
+  if (mode === 'morning') {
+    setDome(0x6a8ac8, 0xa8c8e8, 0xe8d8a8, 0xf8e8c8);
+    placeSun(-600, 200, -350, 0xfff2c8, 0xffe8a0, 0xffe8b0, 420);
+    setFog(0xd8c8a8); setHemi(0xffe8c8, 0x6a7a6a, 1.0);
+    setSunLight(-200, 300, -100, 0xffe0a8, 2.2); setFill(0x8aa8d8, 0.45); setClouds(0.9);
+  } else if (mode === 'afternoon') {
+    setDome(0x2a6ac8, 0x6ab8e8, 0xa8d8f0, 0xe8f0f8);
+    placeSun(-450, 300, -400, 0xfffbe8, 0xfff2b0, 0xfff8d8, 380);
+    setFog(0xbcd8e8); setHemi(0xcfe8ff, 0x8a9a8a, 1.15);
+    setSunLight(200, 400, 150, 0xfff2d8, 2.8); setFill(0x9ab8e8, 0.5); setClouds(0.9);
+  } else if (mode === 'night') {
+    setDome(0x0a0a20, 0x1a1a3a, 0x2a1a4a, 0x3a1a3a);
+    hideSunParts(); moon();
+    setFog(0x0a0a18); setHemi(0x2a2a4a, 0x1a1a2a, 0.35);
+    setSunLight(200, 400, 150, 0x8a8ab8, 0.5); setFill(0x3a4a7a, 0.25); setClouds(0.25);
+  } else { // 'evening' — the locked sunset formula: restore buildSky defaults
+    setDome(0x2a2a5e, 0x8a3a6e, 0xe8763a, 0xffb347);
+    placeSun(-800, 95, -320, 0xfff6d8, 0xffd27a, 0xffc27a, 560);
+    if (sky.streak) { sky.streak.visible = true; sky.streak.position.set(-800, 95, -320); }
+    setFog(0xe08a4a); setHemi(0xffc890, 0x4a3a5a, 0.9);
+    setSunLight(-260, 150, -130, 0xffb36b, 2.4); setFill(0x5a6ab8, 0.4); setClouds(0.85);
+  }
+}
+
+// Digital clock panel (staging DOM, shots.js only). The HUD already has
+// #game-clock (fmtClock: DAY 1 18:36 from playSeconds); this restyles it
+// into a prominent digital panel — big mono time, an English period label
+// (MORNING / AFTERNOON / EVENING / NIGHT) and a sun/moon icon riding a
+// small arc track: morning = low left (rising), noon = high centre-top,
+// evening = low right (setting), night = moon. Pure CSS shapes, no assets.
+// Called AFTER renderHUD (which overwrites the clock text). The taller
+// panel pushes #weapon-panel down, so #prog-panel (absolute, top 182px)
+// is pushed down by the same amount to avoid overlap.
+function buildClockPanel(G, timeStr, hours, day, mode) {
+  const night = hours < 6 || hours >= 20;
+  const label = night ? 'NIGHT'
+    : hours < 12 ? 'MORNING' : hours < 17 ? 'AFTERNOON' : 'EVENING';
+  // Arc position: day fraction f = (hours-6)/12 (06:00 left -> 18:00 right);
+  // night fraction m = hours since 20:00 / 10. Top is a parabola peaking
+  // at mid-arc; left is clamped so the 34 px icon stays on the 64 px track.
+  const f = night ? ((hours - 20 + 24) % 24) / 10 : Math.min(1, Math.max(0, (hours - 6) / 12));
+  const left = (14 + f * 72).toFixed(1);
+  const top = (2 + (1 - 4 * f * (1 - f)) * 14).toFixed(1);
+  const icon = night
+    ? `<div style="position:absolute;left:${left}%;top:${top}px;transform:translate(-50%,-50%);width:32px;height:32px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#f4f4ff,#c8c8e8 70%,#9a9ac8);box-shadow:0 0 14px 4px rgba(200,200,255,0.45)"><div style="position:absolute;left:18px;top:6px;width:8px;height:8px;border-radius:50%;background:rgba(120,120,160,0.55)"></div></div>`
+    : `<div style="position:absolute;left:${left}%;top:${top}px;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff6d8,#ffb347 55%,#ff7a2a);box-shadow:0 0 16px 5px rgba(255,180,80,0.55)"></div>`;
+  const html = `<div style="display:flex;align-items:center;gap:12px;background:rgba(10,14,22,0.88);border:1px solid #f2c230;border-radius:8px;padding:8px 12px;text-align:left">`
+    + `<div><div style="font:800 30px ui-monospace,Menlo,monospace;color:#f5efe0;letter-spacing:1px;line-height:1">${timeStr}</div>`
+    + `<div style="font:700 12px system-ui,sans-serif;color:#f2c230;letter-spacing:2px;margin-top:5px">${label} · DAY ${day}</div></div>`
+    + `<div style="position:relative;width:64px;height:48px;flex:none"><div style="position:absolute;left:2px;right:2px;bottom:2px;height:22px;border:1px dashed rgba(245,239,224,0.35);border-bottom:none;border-radius:30px 30px 0 0"></div>${icon}</div></div>`;
+  if (mode === 'title') {
+    // The title screen has no HUD clock — the panel rides as a fixed chip
+    // top-right over the title screen (same panel, same styling).
+    let chip = document.getElementById('v4-clock-chip');
+    if (!chip) {
+      chip = document.createElement('div');
+      chip.id = 'v4-clock-chip';
+      chip.style.cssText = 'position:fixed;top:12px;right:12px;z-index:50;';
+      document.body.appendChild(chip);
+    }
+    chip.innerHTML = html;
+    return;
+  }
+  const el = document.getElementById('game-clock');
+  if (!el) return;
+  el.innerHTML = html;
+  el.style.marginTop = '4px';
+  // Push #prog-panel (absolute, top 182px) below the taller clock +
+  // weapon panel so nothing overlaps.
+  const wp = document.getElementById('weapon-panel');
+  const pp = document.getElementById('prog-panel');
+  if (wp && pp) pp.style.top = `${wp.getBoundingClientRect().bottom + 12}px`;
+  void G;
+}
+
+// HAWK-1 must read, not silhouette: the heli body is light grey (0xe8e8e8)
+// but backlit against the sunset it renders as a dark shape, and the rotor
+// (0x111111) is invisible. Clone + recolour per mesh (MAT is shared across
+// units — never mutate it in place) and add a warm rim light on the camera
+// side so the body reads light blue-white with a visible rotor.
+function brightenHeli(G, heli) {
+  const THREE = G.three;
+  if (!heli || !heli.mesh) return;
+  heli.mesh.traverse((o) => {
+    const m = o.material;
+    if (!m || !m.color) return;
+    const hex = m.color.getHex();
+    o.material = m.clone();
+    if (hex === 0xe8e8e8) { // body + tail
+      o.material.color.setHex(0xd8ecff);
+      o.material.emissive.setHex(0x8fb8e8);
+      o.material.emissiveIntensity = 0.6;
+    } else if (hex === 0x111111) { // main + tail rotor
+      o.material.color.setHex(0x4a5568);
+      o.material.emissive.setHex(0x2a3448);
+      o.material.emissiveIntensity = 0.8;
+    } else if (hex === 0x22262e) { // fin + skids
+      o.material.color.setHex(0x3a4a5a);
+      o.material.emissive.setHex(0x1a2a3a);
+      o.material.emissiveIntensity = 0.5;
+    } else if (hex === 0x1a2a3a) { // nose glass
+      o.material.color.setHex(0x3a6a8a);
+      o.material.emissive.setHex(0x1a3a5a);
+      o.material.emissiveIntensity = 0.6;
+    }
+  });
+  // Warm rim light on the camera (east) side of the heli, below it — lifts
+  // the shadow-side body out of the sunset backlight.
+  const rim = new THREE.PointLight(0xffe8c0, 90, 26, 1.6);
+  const p = heli.mesh.position;
+  rim.position.set(p.x + 8, p.y - 4, p.z + 3);
+  G.scene.add(rim);
+}
+
+// Wowo bigger / more contrast: the brown jacket (0x6a4a2a) reads near-black
+// in shadow, and the jetpack tanks vanish against the sky. Clone each
+// distinct material once (the jacket is shared torso+arms) and lift it with
+// self-coloured emissive so the figure reads as a PERSON, not a silhouette.
+function brightenWowo(G) {
+  if (!G.player || !G.player.mesh) return;
+  const seen = new Map();
+  G.player.mesh.traverse((o) => {
+    const m = o.material;
+    if (!m || !m.color) return;
+    if (!seen.has(m)) {
+      const c = m.clone();
+      const hex = m.color.getHex();
+      if (hex === 0x6a4a2a) { c.emissive.setHex(0x6a4a2a); c.emissiveIntensity = 0.7; } // jacket
+      else if (hex === 0xd9a077) { c.emissive.setHex(0xd9a077); c.emissiveIntensity = 0.35; } // skin
+      else if (hex === 0x8a8f96) { c.color.setHex(0xaab0b8); c.emissive.setHex(0x4a5568); c.emissiveIntensity = 0.6; } // tanks
+      else if (hex === 0xd86a20) { c.emissive.setHex(0xd86a20); c.emissiveIntensity = 0.8; } // bands
+      seen.set(m, c);
+    }
+    o.material = seen.get(m);
+  });
+}
+
+// Night street lights: warm point lights above the sidewalks so the road,
+// the fleeing peds and the police cars read at night (no visible fixtures —
+// the warm pools on the asphalt sell the street lighting).
+function addStreetLights(G, spots) {
+  const THREE = G.three;
+  for (const [x, z] of spots) {
+    const l = new THREE.PointLight(0xffb36b, 80, 28, 1.8);
+    l.position.set(x, 6, z);
+    G.scene.add(l);
+  }
 }
 
 // Muzzle flash sphere + light at `from`, and a bright tracer line to `to`.
@@ -312,6 +529,9 @@ function stageChase(G) {
   G.player.money = 38420;
   G.player.health = 100;
   G.player.armour = 50;
+  // V4: clock drives the sky preset — EVENING 18:36 (dusk, locked formula).
+  G.stats.playSeconds = 0;
+  restageSky(G, 'evening');
   // V3-6: nitro owned so the gauge reads NITRO READY, not NOT INSTALLED.
   if (!G.garage) G.garage = { owned: {} };
   if (!G.garage.owned) G.garage.owned = {};
@@ -345,6 +565,7 @@ function stageChase(G) {
   // washed out. The beam lands on open asphalt at the road's north edge.
   const heli = spawnHeli(G, PX - 18, PZ - 15, 13);
   addSearchlightBeam(G, PX - 18, PZ - 15, 13);
+  brightenHeli(G, heli); // V4: light blue-white body + visible rotor, never a silhouette
   G.police.units = [
     { name: 'UNIT 23', dist: 5, status: 'RAMMING', mesh: ram.mesh },
     { name: 'UNIT 12', dist: 8, status: 'FLIPPED', mesh: flipped.mesh },
@@ -419,10 +640,10 @@ function stageChase(G) {
   const E = Math.PI / 2; // east, toward the camera
   const panic = poseRunPed(spawnPed(G, PX - 12, PZ + 8), Math.PI, true);
   panic.mesh.position.set(PX - 12, 0.10, PZ + 8.5); // south sidewalk, arms up at the flipped unit
-  const sr1 = poseRunPed(spawnPed(G, PX - 18, PZ + 8), W);
-  sr1.mesh.position.set(PX - 18, 0.10, PZ + 8.5);
-  const sr2 = poseRunPed(spawnPed(G, PX - 26, PZ + 8), E);
-  sr2.mesh.position.set(PX - 26, 0.10, PZ + 8.5);
+  const sr1 = poseRunPed(spawnPed(G, PX - 18, PZ + 8), W, false, true);
+  sr1.mesh.position.set(PX - 18, 0.10, PZ + 8.5); // sprint — closest runner
+  const sr2 = poseRunPed(spawnPed(G, PX - 26, PZ + 8), E, false, true);
+  sr2.mesh.position.set(PX - 26, 0.10, PZ + 8.5); // sprint — toward the camera
   const sr3 = poseRunPed(spawnPed(G, PX - 34, PZ + 8), W);
   sr3.mesh.position.set(PX - 34, 0.10, PZ + 8.5);
   const sr4 = poseRunPed(spawnPed(G, PX - 42, PZ + 8), W);
@@ -433,10 +654,21 @@ function stageChase(G) {
   sr6.mesh.position.set(PX - 60, 0.10, PZ + 8.5);
   const sr7 = poseRunPed(spawnPed(G, PX - 68, PZ + 8), E);
   sr7.mesh.position.set(PX - 68, 0.10, PZ + 8.5);
+  const sr8 = poseRunPed(spawnPed(G, PX - 74, PZ + 8), W);
+  sr8.mesh.position.set(PX - 74, 0.10, PZ + 8.5); // far west depth
   const cross1 = poseRunPed(spawnPed(G, PX - 30, PZ - 8), Math.PI);
   cross1.mesh.position.set(PX - 30, 0.10, PZ); // mid-crossing, northbound
   const cross2 = poseRunPed(spawnPed(G, PX - 42, PZ - 8), Math.PI);
   cross2.mesh.position.set(PX - 42, 0.10, PZ); // mid-crossing, northbound
+  // V4 round 4 (top-5 bar): two MORE crossing peds, CLOSER to the camera
+  // than the first pair — side profile, sprint pose, right in front of
+  // the flipped unit, so the fleeing reads in the first glance, not at
+  // 30 px down the street. Clear of the GT (PX-1), the ram unit (PX-6)
+  // and the flipped unit (PX-8, 6 m east of cross3).
+  const cross3 = poseRunPed(spawnPed(G, PX - 14, PZ - 8), Math.PI, false, true);
+  cross3.mesh.position.set(PX - 14, 0.10, PZ); // mid-crossing, northbound, sprint
+  const cross4 = poseRunPed(spawnPed(G, PX - 20, PZ - 8), Math.PI, false, true);
+  cross4.mesh.position.set(PX - 20, 0.10, PZ); // mid-crossing, northbound, sprint
   const nr1 = poseRunPed(spawnPed(G, PX - 62, PZ - 8), W);
   nr1.mesh.position.set(PX - 62, 0.10, PZ - 8.5); // north sidewalk, far depth
 
@@ -455,13 +687,16 @@ function stageChase(G) {
   G.combat.weaponIndex = 1; // SMG in the rack
   G.audio.radioIndex = 0;
   showDialogue(G, 'WOWO', 'They will never take me alive. Not on my island.', 60000);
+  brightenWowo(G); // V4: jacket + skin lift so Wowo reads in shadow
   // Camera close at Wowo's shoulder: Wowo + GT big in the foreground, the
   // flipped units, roadblock, heli and sunset ahead, prompt on the steal.
-  placeChaseCamera(G, G.player.pos, H, 10.5, 4.2, 0, -2, 62, 4.5);
+  // V4: dist 8.5 (was 10.5) — Wowo bigger, chase chaos closer.
+  placeChaseCamera(G, G.player.pos, H, 8.5, 4.2, 0, -2, 62, 4.5);
   G.camera.lookAt(PX - 26, 0.8, PZ - 1);
   G.camera.updateProjectionMatrix();
   renderHUD(G);
   renderMinimap(G);
+  buildClockPanel(G, '18:36', 18.6, 1, 'hud'); // EVENING, sun low right
 }
 
 // ---------------------------------------------------------------- title
@@ -470,7 +705,11 @@ function stageTitle(G) {
   // (JOB 5/8 · $48,250 · 63%) instead of "NO SAVE YET".
   G.stats.carsStolen = 38;
   G.stats.escapes = 13;
-  G.stats.playSeconds = 7420;
+  // V4: DAY 2 13:00 — AFTERNOON (clock drives the day preset). The
+  // CONTINUE line shows JOB 5/8 · $48,250 · 63% (saveSummary: missionsDone,
+  // money, percent — playSeconds is never displayed on the title screen),
+  // so the longer play time does not touch the progress proof.
+  G.stats.playSeconds = 66240;
   G.stats.missionsDone = 5;
   G.player.money = 48250;
   G.player.health = 100;
@@ -478,14 +717,23 @@ function stageTitle(G) {
   startMission(G, 5); // Job 6 Konfrontasi — 5 jobs done
   saveGame(G); // writes the real save; showTitle reads it via saveSummary()
   G.setMode('title');
-  // Westward view: Casino Row towers + beach under the sunset, sun in frame.
+  restageSky(G, 'afternoon'); // V4: bright blue day, high white sun
+  // Westward view: Casino Row towers + beach under the day sky, sun in frame.
   // showTitle (via setMode) paints the portraits and reveals HOW TO PLAY.
-  addSunFlare(G, -700, 135, -245, 380);
+  // (No sunset flare here — the afternoon sun comes from restageSky.)
+  // V4: AFTERNOON life — staged traffic cars on the streets below the
+  // panorama so the day city reads alive, not empty.
+  const tc1 = spawnTrafficCar(G, -150, -200, Math.PI / 2, 'Solano S');
+  const tc2 = spawnTrafficCar(G, -100, -200, -Math.PI / 2, 'Palma Cruiser');
+  const tc3 = spawnTrafficCar(G, -120, -100, 0, 'Cayo Coupe');
+  const tc4 = spawnTrafficCar(G, -180, -120, Math.PI / 2, 'Marina Taxi');
+  for (const tc of [tc1, tc2, tc3, tc4]) brightenCar(G, tc);
   G.camera.position.set(90, 72, 210);
   G.camera.lookAt(-260, 28, -150);
   G.camera.fov = 58;
   G.camera.updateProjectionMatrix();
   G.renderer.render(G.scene, G.camera);
+  buildClockPanel(G, '13:00', 13.0, 2, 'title'); // AFTERNOON, sun high centre-top
 }
 
 // ---------------------------------------------------------------- combat
@@ -508,6 +756,9 @@ function stageCombat(G) {
   G.player.health = 82;
   G.player.armour = 40;
   G.player.money = 12500;
+  // V4: clock drives the sky preset — NIGHT, DAY 1 22:36.
+  G.stats.playSeconds = 14400;
+  restageSky(G, 'night');
   setWanted(G, 2);
   G.police.units = [
     { name: 'UNIT 07', dist: 120, status: 'PURSUIT', mesh: null },
@@ -536,7 +787,8 @@ function stageCombat(G) {
   G.player.pos.y = 5.0;
   const jpFlame = G.player.mesh && G.player.mesh.userData
     ? G.player.mesh.userData.jetpackFlame : null;
-  if (jpFlame) jpFlame.scale.setScalar(1.8);
+  if (jpFlame) jpFlame.scale.setScalar(2.0); // V4: was 1.8 — slightly bigger thrust
+  brightenWowo(G); // V4: jacket + tanks lift so the figure reads as a PERSON with a jetpack
   // Jetpack smoke trail below Wowo — the rising puffs are what sells
   // "he flew up here" at a glance (kept >8 m from the blast point so the
   // smoke-dimming below never touches them).
@@ -732,14 +984,57 @@ function stageCombat(G) {
   ccross1.mesh.position.set(120, 0.10, 251); // crossing east, clear of the blast
   const ccross2 = poseRunPed(spawnPed(G, 122, 260), Math.PI / 2);
   ccross2.mesh.position.set(122, 0.10, 260); // crossing east, south of the SMG label ray
-  const field1 = poseRunPed(spawnPed(G, 106, 261), -0.5);
-  field1.mesh.position.set(106, 0.10, 261); // foreground field, fleeing southwest
-  const field2 = poseRunPed(spawnPed(G, 109, 259), -0.5);
-  field2.mesh.position.set(109, 0.10, 259); // foreground field, fleeing southwest
+  const field1 = poseRunPed(spawnPed(G, 106, 261), -0.5, false, true);
+  field1.mesh.position.set(106, 0.10, 261); // foreground field, fleeing southwest, sprint
+  const field2 = poseRunPed(spawnPed(G, 109, 259), -0.5, false, true);
+  field2.mesh.position.set(109, 0.10, 259); // foreground field, fleeing southwest, sprint
+  // V4 round 4 (top-5 bar): two MORE field runners on the WEST side of the
+  // green foreground, big and close to the camera — the left foreground
+  // was empty grass. Clear of the downed gunman (104.8, 256.1), the
+  // PISTOL drop label and the blast; both sprint, southwest, away from it.
+  const field3 = poseRunPed(spawnPed(G, 97, 254), -0.5, false, true);
+  field3.mesh.position.set(97, 0.10, 254); // west field, fleeing southwest, sprint
+  const field4 = poseRunPed(spawnPed(G, 95, 258), -0.5, false, true);
+  field4.mesh.position.set(95, 0.10, 258); // west field, fleeing southwest, sprint
   const cSouth = spawnTrafficCar(G, 120, 262, 0, 'Palma Cruiser'); // southbound
   const cNorth = spawnTrafficCar(G, 120, 246, Math.PI, 'Solano S'); // northbound
   brightenCar(G, cSouth);
   brightenCar(G, cNorth);
+
+  // V4: IDPD VISIBLE in frame — two responding units on the roads (the
+  // panel alone showed 2 units, zero in frame). Screen positions probed
+  // before placing: (120,242) -> sx 710 sy 417, (100,240) -> sx 322 sy 428
+  // — both in frame, clear of the drops labels and the blast. Light bars
+  // set bright directly (the flashing update loop never runs in the frozen
+  // shot; userData.lightRed/lightBlue are meshes with per-car cloned
+  // materials, so the emissive lift touches only these two cars).
+  const pc1 = spawnPoliceCar(G, 120, 242, 0); // x=120 road, facing the blast
+  pc1.status = 'RESPONDING'; pc1.dist = 18;
+  const pc2 = spawnPoliceCar(G, 100, 240, Math.PI / 2); // z=240 cross street, facing east
+  pc2.status = 'EN ROUTE'; pc2.dist = 35;
+  for (const pc of [pc1, pc2]) {
+    const u = pc.mesh.userData;
+    if (u.lightRed) u.lightRed.material.emissiveIntensity = 2.2;
+    if (u.lightBlue) u.lightBlue.material.emissiveIntensity = 2.2;
+  }
+  // One IDPD officer on foot, running in from the lead unit (shirt
+  // recolored IDPD-blue; the shirt material is shared torso+arms, so the
+  // clone covers the whole uniform top).
+  const officer = poseRunPed(spawnPed(G, 117, 242), 0);
+  officer.mesh.position.set(117, 0.10, 242);
+  const shirtMat = officer.mesh.userData.armL.material;
+  const blueShirt = shirtMat.clone();
+  blueShirt.color.setHex(0x2a4a8a);
+  blueShirt.emissive.setHex(0x0a1a3a);
+  blueShirt.emissiveIntensity = 1;
+  officer.mesh.traverse((o) => { if (o.material === shirtMat) o.material = blueShirt; });
+  // Night street lights along the x=120 road so the night scene reads
+  // (fire/tracers/muzzle + police light bars already help; the warm pools
+  // on the asphalt sell the street lighting).
+  addStreetLights(G, [[111.5, 248], [128.5, 256], [111.5, 264]]);
+  // Lit windows come free at night: the building windows are an
+  // InstancedMesh with MeshBasicMaterial (unlit, warm glass), so they stay
+  // bright while the Standard-material bodies go dark — verify in the render.
 
   showDialogue(G, 'WOWO', 'Three of them. The cache is behind that wall. Move.', 60000);
   pushScorePopup(G, '-220', 'damage', 'BAZOOKA HIT');
@@ -756,18 +1051,19 @@ function stageCombat(G) {
     + '<div style="font:700 13px system-ui,sans-serif;color:#7ec8e8;margin-top:3px;">UNLOCKED: JOB 6 — KONFRONTASI</div>';
   const hudEl = document.getElementById('hud');
   if (hudEl) hudEl.appendChild(banner);
-  // Camera: closer (dist 5.5) and a touch higher than the old low angle
+  // Camera: closer (dist 4.5, was 5.5) and a touch higher than the old low angle
   // (y ~3.5, still below Wowo's 5.0 so he silhouettes against the sky,
   // not the ground) — a full top-down angle foreshortens him and hides
   // him behind the fireball. Aim AT the blast, y 4.0, so the drops on
   // the ground read below it. Wowo stays large, left of the banner.
-  placeChaseCamera(G, G.player.pos, H, 5.5, -1.5, 0, 0, 64, 4);
+  placeChaseCamera(G, G.player.pos, H, 4.5, -1.5, 0, 0, 64, 4);
   G.camera.lookAt(bp.x, 4.0, bp.z);
   G.camera.updateProjectionMatrix();
   const popLayer = document.getElementById('score-popups');
   if (popLayer) popLayer.style.top = '20%';
   renderHUD(G);
   renderMinimap(G);
+  buildClockPanel(G, '22:36', 22.6, 1, 'hud'); // NIGHT, moon icon
 }
 
 // ---------------------------------------------------------------- map

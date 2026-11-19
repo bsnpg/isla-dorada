@@ -510,12 +510,22 @@ export function drawMap(G) {
   c.fillStyle = '#c9a86a';
   c.fillRect(toPx(WORLD.beachX), 0, toPx(WORLD.beachX + 20) - toPx(WORLD.beachX), SIZE);
 
-  // District washes + labels.
-  for (const d of DISTRICTS) {
-    c.globalAlpha = 0.14;
-    c.fillStyle = d.color;
+  // District washes + labels. V4: the washes were 0.14 alpha over a dark
+  // island, so the map read as one uniform dark grid — the district colours
+  // (gold/yellow/tan/blue/green/blue/tan in config.js) never showed. Now a
+  // vivid per-district palette at 0.32 alpha + a coloured border per zone,
+  // so the districts read as green/pink/blue zones at a glance. (map.js is
+  // post-cut in the dossier, so this costs no dossier bytes.)
+  const DISTRICT_WASH = ['#e8b64c', '#e85a9a', '#c98a4b', '#4fb3d9', '#7ec850', '#8a5ad9', '#d95a3a'];
+  DISTRICTS.forEach((d, i) => {
+    c.globalAlpha = 0.32;
+    c.fillStyle = DISTRICT_WASH[i % DISTRICT_WASH.length];
     c.fillRect(toPx(d.minX), toPx(d.minZ), (d.maxX - d.minX) * SCALE, (d.maxZ - d.minZ) * SCALE);
-  }
+    c.globalAlpha = 0.55;
+    c.strokeStyle = DISTRICT_WASH[i % DISTRICT_WASH.length];
+    c.lineWidth = 2;
+    c.strokeRect(toPx(d.minX), toPx(d.minZ), (d.maxX - d.minX) * SCALE, (d.maxZ - d.minZ) * SCALE);
+  });
   c.globalAlpha = 1;
 
   drawRoads(c);
@@ -540,9 +550,9 @@ export function drawMap(G) {
   // District names: small and faint, tucked into each district's top-left corner
   // (district centres coincide with landmark dots, so centre labels collide).
   // Drawn after the roads so road strokes never cross the text.
-  c.font = '600 11px system-ui, sans-serif';
+  c.font = '700 12px system-ui, sans-serif';
   c.textAlign = 'left';
-  c.fillStyle = 'rgba(245,239,224,0.55)';
+  c.fillStyle = 'rgba(245,239,224,0.85)';
   for (const d of DISTRICTS) {
     c.fillText(d.name.toUpperCase(), toPx(d.minX) + 8, toPx(d.minZ) + 16);
   }
