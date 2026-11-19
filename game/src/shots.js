@@ -157,6 +157,71 @@ function addBillboard(G, x, z, faceHeading, text, color, sub) {
   return group;
 }
 
+// V6 park props (staging only): a palm-lined north-shoulder park for the
+// right edge of the rotated chase shot — Karimbu-beach style. The palm
+// mirrors city.js (6 m trunk, 6 fronds, Euler(0, yaw, -0.55, YXZ)).
+function addPalm(G, x, z, s) {
+  const THREE = G.three;
+  const sc = s || 1;
+  const group = new THREE.Group();
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.16 * sc, 0.28 * sc, 6 * sc, 6),
+    new THREE.MeshStandardMaterial({ color: 0x6a4a2a, roughness: 1 }),
+  );
+  trunk.position.y = 3 * sc;
+  group.add(trunk);
+  const frondMat = new THREE.MeshStandardMaterial({ color: 0x3a7a2a, roughness: 0.9, side: THREE.DoubleSide });
+  for (let f = 0; f < 6; f++) {
+    const yaw = (f / 6) * Math.PI * 2;
+    const frond = new THREE.Mesh(new THREE.PlaneGeometry(2.6 * sc, 0.9 * sc), frondMat);
+    frond.quaternion.setFromEuler(new THREE.Euler(0, yaw, -0.55, 'YXZ'));
+    const off = new THREE.Vector3(1.3 * sc, 0, 0).applyQuaternion(frond.quaternion);
+    frond.position.set(off.x, 6.2 * sc + off.y, off.z);
+    group.add(frond);
+  }
+  group.position.set(x, 0, z);
+  G.scene.add(group);
+  return group;
+}
+
+// Park bench: wooden seat + backrest on iron legs, faces +z (the road)
+// at ry ≈ 0.
+function addBench(G, x, z, ry) {
+  const THREE = G.three;
+  const group = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x7a5a3a, roughness: 0.9 });
+  const iron = new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.6, metalness: 0.5 });
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 0.55), wood);
+  seat.position.y = 0.45;
+  group.add(seat);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 0.1), wood);
+  back.position.set(0, 0.85, -0.25);
+  back.rotation.x = -0.15;
+  group.add(back);
+  for (const sx of [-0.7, 0.7]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.45, 0.5), iron);
+    leg.position.set(sx, 0.22, 0);
+    group.add(leg);
+  }
+  group.position.set(x, 0, z);
+  group.rotation.y = ry || 0;
+  G.scene.add(group);
+  return group;
+}
+
+// Low hedge / planter box: a solid green mass that reads at the frame
+// edge where thin poles vanish behind the HUD.
+function addHedge(G, x, z, len) {
+  const THREE = G.three;
+  const hedge = new THREE.Mesh(
+    new THREE.BoxGeometry(len, 1.4, 0.8),
+    new THREE.MeshStandardMaterial({ color: 0x4a9a3a, roughness: 0.9, emissive: 0x1a3a1a, emissiveIntensity: 0.5 }),
+  );
+  hedge.position.set(x, 0.7, z);
+  G.scene.add(hedge);
+  return hedge;
+}
+
 // Cars are built with metalness 0.6 and the scene has no environment map,
 // so sunlit metal reads fine but the SHADOW side of a body panel renders
 // near-black (the gold GT looked like a black box from the chase camera).
@@ -604,29 +669,25 @@ function stageChase(G) {
   const flipped2 = flipPoliceCar(G, PX - 26, PZ - 3.5, H + 0.4, { y: 1.8, pitch: 0.5, roll: Math.PI * 0.7 });
   const block = spawnPoliceCar(G, PX - 52, PZ - 1.5, -H);
   block.status = 'ROADBLOCK';
-  // V5 (recording #17) — USER REFRAME: the heli is composed AGAINST the
-  // green Casino Row building, not the sky. The building face (south side,
-  // z≈-262) projects to screen-left/centre; the old north-side heli
-  // (PX-18, PZ-15) projected top-right against open sky with its rotor
-  // cropped (probe: box corners sy -53..127, sx 872..1223). The new heli
-  // sits south of the road at (PX-32, PZ+14, 9) — probe centre (451,247) —
-  // fully in frame against the building wall, clear of the sun (798,214)
-  // and of the CASINO DORADA billboard text (560,241). A pure camera pan
-  // could not do this: the building and the old heli sit on opposite
-  // sides of the road, so only moving the heli onto the building's
-  // sightline works. The beam + pool move with it (south sidewalk).
-  const heli = spawnHeli(G, PX - 32, PZ + 14, 9);
-  addSearchlightBeam(G, PX - 32, PZ + 14, 9);
+  // V6 (user 19 Nov ~19:56-19:57) — the V5 heli sat ON the green
+  // building's face and read as flying INTO it, side-on. Now: over the
+  // road in OPEN SKY, clear of every building edge, FRONT-FACING (nose
+  // toward the camera, not side-on). spawnHeli's nose is local +z, so
+  // rotation.y ≈ 1.69 points the nose east at the camera (probe B30H2:
+  // nose/tail screen points collapse to ~3 px apart = foreshortened).
+  // 1.6x scale + closer (38 m from the GT) so it reads as a helicopter,
+  // not a dark speck. Beam + pool move with it (over the road now).
+  const heli = spawnHeli(G, PX - 38, PZ, 11);
+  addSearchlightBeam(G, PX - 38, PZ, 11);
   brightenHeli(G, heli); // V4: light blue-white body + visible rotor, never a silhouette
-  // V5r2: heli 1.3x bigger — at 1.0x it read as a small white box (160 px)
-  // against the building; 1.3x keeps it fully in frame (~215 px wide).
-  heli.mesh.scale.setScalar(1.3);
+  heli.mesh.scale.setScalar(1.6);
+  heli.mesh.rotation.y = 1.69; // front-facing: nose toward the camera
   G.police.units = [
     { name: 'UNIT 23', dist: 5, status: 'RAMMING', mesh: ram.mesh },
     { name: 'UNIT 12', dist: 8, status: 'FLIPPED', mesh: flipped.mesh },
     { name: 'UNIT 41', dist: 26, status: 'FLIPPED', mesh: flipped2.mesh },
     { name: 'UNIT 07', dist: 52, status: 'ROADBLOCK', mesh: block.mesh },
-    { name: 'HAWK-1', dist: 35, status: 'SEARCHLIGHT', mesh: heli.mesh },
+    { name: 'HAWK-1', dist: 38, status: 'SEARCHLIGHT', mesh: heli.mesh },
     { name: 'UNIT 31', dist: 210, status: 'PURSUIT', mesh: null },
   ];
 
@@ -739,6 +800,40 @@ function stageChase(G) {
   const nrf2 = poseRunPed(spawnPed(G, PX - 24, PZ - 9), W);
   nrf2.mesh.position.set(PX - 24, 0.10, PZ - 9); // north sidewalk, fleeing west
 
+  // V6 PARK (user 19 Nov ~19:56): fill the right edge (north shoulder,
+  // which the ~30° camera rotation swings to the frame's right) with a
+  // palm-lined park — palms, hedges, benches — Karimbu-beach style.
+  // CHAOS IS KEPT (user 19 Nov ~19:58): no runner is removed anywhere;
+  // the park ADDS five more fleeing peds. Round 1 (palms z -293..-296,
+  // scale 1.0) probed almost invisible — trunks thin at the frame edge,
+  // fronds + lamp heads hidden behind the HUD panel (sx 1040-1270,
+  // sy 230-370). Round 2 (1.5x, z -291..-292) still read weak: fronds
+  // split by the panel, hedges too dark/small. Round 3: palms 2.0x
+  // (12 m — fronds land in the visible band between the clock panel and
+  // the IDOLS panel, sy ~130-190), hedges 7 m x 1.4 m in bright lit
+  // green below the panel, lamps dropped (heads would sit behind the
+  // panel). Clear of the t8 grass car (-150,-291).
+  addPalm(G, -156, -291, 2.0);
+  addPalm(G, -166, -292, 2.0);
+  addPalm(G, -176, -291, 2.0);
+  addPalm(G, -186, -292, 2.0);
+  addPalm(G, -196, -293, 2.0);
+  addHedge(G, -163, -292, 7);
+  addHedge(G, -178, -292, 7);
+  addHedge(G, -193, -293, 7);
+  addBench(G, -168, -291.5, 0.1);
+  addBench(G, -188, -292.5, -0.1);
+  const pk1 = poseRunPed(spawnPed(G, -162, -291), W, false, true);
+  pk1.mesh.position.set(-162, 0.10, -291.5); // park runner, sprint west
+  const pk2 = poseRunPed(spawnPed(G, -172, -291.5), W, false, true);
+  pk2.mesh.position.set(-172, 0.10, -291.5); // park runner, sprint west
+  const pk3 = poseRunPed(spawnPed(G, -186, -292), W);
+  pk3.mesh.position.set(-186, 0.10, -292.5); // park runner, fleeing west
+  const pk4 = poseRunPed(spawnPed(G, -196, -292), W, false, true);
+  pk4.mesh.position.set(-196, 0.10, -292.5); // park runner, sprint west
+  const pk5 = poseRunPed(spawnPed(G, -158, -290.5), W, false, true);
+  pk5.mesh.position.set(-158, 0.10, -290.5); // park runner, sprint west, road edge
+
   // V3 density: a second downed officer on the south shoulder with his own
   // loot — the flipped units threw two men out, not one.
   spawnDownedEnemy(G, PX - 18, PZ + 7.6, 'heavy');
@@ -765,7 +860,15 @@ function stageChase(G) {
   // GT big in the foreground, flipped units, roadblock, heli and sunset
   // ahead. V4: dist 8.5 (was 10.5). V5: dist 7.5 — GT bigger still.
   placeChaseCamera(G, G.player.pos, H, 7.5, 4.2, 0, -2, 62, 4.5);
-  G.camera.lookAt(PX - 26, 0.8, PZ - 1);
+  // V6 (user 19 Nov ~19:56): rotate the view ~30° toward the Casino
+  // Dorada building (south/left) so the chase angles at the building
+  // instead of straight down the road. A full 45° was probed first
+  // (probe A45): it pushes the sun off-frame, crowds the flipped cars
+  // + roadblock onto the right edge, and swings the north-shoulder park
+  // out of frame — 30° keeps the sun, the whole pile-up AND the park
+  // in frame while the building fills the centre-left. Look target
+  // (PX-23, PZ+13): 35 m along the new view dir from the camera.
+  G.camera.lookAt(PX - 23, 0.8, PZ + 13);
   G.camera.updateProjectionMatrix();
   renderHUD(G);
   renderMinimap(G);
