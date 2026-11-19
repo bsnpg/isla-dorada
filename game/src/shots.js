@@ -10,7 +10,7 @@
 // nothing here depends on them):
 //   chase  — the cover: WESTBOUND into the sunset on the north coastal road,
 //            sun + flare dead ahead, neon billboards, a police car RAMMING
-//            the player's rear quarter (contact), a FLIPPED police car, a
+//            the getaway car (contact), a FLIPPED police car, a
 //            roadblock, a BURNING traffic car, the heli overhead, traffic +
 //            peds, DRIFT x3 + NEAR MISS +$250 popups, portrait dialogue.
 //   title  — bright title over a westward sunset view of Casino Row.
@@ -253,11 +253,10 @@ function stageChase(G) {
   const PX = -140, PZ = -280, H = -Math.PI / 2;
   const car = makeCar(G, 'Aurea GT', PX, PZ, H);
   brightenCar(G, car); // gold must read gold from the shadow side too
-  G.player.mode = 'car';
-  G.player.pos.set(PX, 0, PZ);
+  G.player.mode = 'foot'; // V3-7: on foot, stealing the GT (prompt proves it)
+  G.player.pos.set(PX - 1, 0, PZ - 3.5);
   G.player.heading = H;
-  G.driving.car = car;
-  G.driving.speed = 38; // ~137 km/h
+  G.driving.parked.push(car); // GT is the steal target
   G.player.money = 38420;
   G.player.health = 100;
   G.player.armour = 50;
@@ -278,7 +277,7 @@ function stageChase(G) {
   // the chase camera to read as a car instead of a wall — one FLIPPED on its
   // roof ahead-left, one roadblock head-on ahead, heli overhead.
   setWanted(G, 4);
-  const ram = spawnPoliceCar(G, PX - 4.5, PZ - 3.0, H + 2.8);
+  const ram = spawnPoliceCar(G, PX - 6, PZ - 2, H + 2.8);
   ram.status = 'RAMMING';
   // V3-1: the flipped unit is the CENTRE of the cover — caught mid-flip in
   // the air directly ahead of the GT (not a background wreck).
@@ -288,9 +287,9 @@ function stageChase(G) {
   const flipped2 = flipPoliceCar(G, PX - 26, PZ - 3.5, H + 0.4, { y: 1.8, pitch: 0.5, roll: Math.PI * 0.7 });
   const block = spawnPoliceCar(G, PX - 52, PZ - 1.5, -H);
   block.status = 'ROADBLOCK';
-  const heli = spawnHeli(G, PX - 34, PZ - 16, 12); // V3-5: lower, searchlight cone in frame
+  const heli = spawnHeli(G, PX - 40, PZ - 18, 13); // V3-5: high, clear of billboards, rotor vs sky
   G.police.units = [
-    { name: 'UNIT 23', dist: 4, status: 'RAMMING', mesh: ram.mesh },
+    { name: 'UNIT 23', dist: 5, status: 'RAMMING', mesh: ram.mesh },
     { name: 'UNIT 12', dist: 8, status: 'FLIPPED', mesh: flipped.mesh },
     { name: 'UNIT 41', dist: 26, status: 'FLIPPED', mesh: flipped2.mesh },
     { name: 'UNIT 07', dist: 52, status: 'ROADBLOCK', mesh: block.mesh },
@@ -343,6 +342,9 @@ function stageChase(G) {
   spawnPed(G, PX - 70, PZ - 8);
   spawnPed(G, PX - 88, PZ + 8);
   spawnPed(G, PX - 6, PZ - 8);
+  spawnPed(G, PX - 2, PZ - 7.5);
+  spawnPed(G, PX - 18, PZ + 7.5);
+  spawnPed(G, PX - 40, PZ - 7.5);
 
   // V3 density: a second downed officer on the south shoulder with his own
   // loot — the flipped units threw two men out, not one.
@@ -359,20 +361,10 @@ function stageChase(G) {
   G.combat.weaponIndex = 1; // SMG in the rack
   G.audio.radioIndex = 0;
   showDialogue(G, 'WOWO', 'They will never take me alive. Not on my island.', 60000);
-  // Score popups the judge asked for: drift chain + a near miss, live in
-  // shot mode until the screenshot (hud.js holds them 60 s in shot mode).
-  pushScorePopup(G, 'DRIFT x3', 'drift', '+$150');
-  pushScorePopup(G, 'NEAR MISS', 'nearmiss', '+$250');
-  // Camera higher and further back, pitched down ~11 degrees, and shifted
-  // to the NORTH side of the road (lat +4.5): a 3/4 rear view, so the GT's
-  // sunlit north flank reads instead of its dead-black rear. The GT sits
-  // whole ABOVE the dialogue box, the flipped unit and the burning car ahead,
-  // the sun still in frame up top, the heli (lowered to 18 m) just inside
-  // the top edge.
-  placeChaseCamera(G, G.player.pos, H, 12.5, 5.2, 0, -2, 62, 4.5);
-  // Aim nearer and lower than the default look target so the GT rides near
-  // frame centre instead of sliding under the HUD.
-  G.camera.lookAt(PX - 24, 0.5, PZ - 1);
+  // Camera close at Wowo's shoulder: Wowo + GT big in the foreground, the
+  // flipped units, roadblock, heli and sunset ahead, prompt on the steal.
+  placeChaseCamera(G, G.player.pos, H, 10.5, 4.2, 0, -2, 62, 4.5);
+  G.camera.lookAt(PX - 26, 0.8, PZ - 1);
   G.camera.updateProjectionMatrix();
   renderHUD(G);
   renderMinimap(G);
@@ -496,13 +488,13 @@ function stageCombat(G) {
   spawnDamageNumber(G, bp.x, 5.5, bp.z, '-220', '#ff8a3a');
 
   // --- a CAR thrown through the air by the blast (posed directly) ---
-  // Heading-relative placement (offsetFrom): 14 m screen-RIGHT of the blast
+  // Heading-relative placement (offsetFrom): 11 m screen-RIGHT of the blast
   // core so it clears the fireball instead of hiding inside/behind it (the
   // old raw x/z offset landed it at the fireball's right edge, unreadable).
   // A yellow Marina Taxi, so the flying car reads at a glance instead of
   // vanishing into the dark buildings like a dark coupe did. Raised to 5.5 m
   // so it is clearly ABOVE the ground, tumbling, nose-down, mid-air.
-  const taxiP = offsetFrom(bp.x, bp.z, H, 2, 14);
+  const taxiP = offsetFrom(bp.x, bp.z, H, 2, 11);
   const thrown = makeCar(G, 'Marina Taxi', taxiP.x, taxiP.z, H + 0.9);
   brightenCar(G, thrown);
   thrown.mesh.position.y = 5.5;
@@ -510,15 +502,15 @@ function stageCombat(G) {
   addFire(G, taxiP.x, taxiP.z, 0.9);
 
   // --- a BODY frozen mid-air at the peak of the blast ---
-  // A heavy (1.25x bulk, bigger silhouette), 13 m screen-LEFT of the blast
-  // core (heading-relative, so it clears the fireball on the other side from
-  // the taxi) and raised to 6.0 m so it silhouettes against the SKY, not the
-  // orange fireball. Bright IDPD-blue uniform (cloned material, so no other
+  // A heavy (1.25x bulk, bigger silhouette), 9 m screen-LEFT of the blast
+  // core and 4 m back toward the camera (so he reads BIG, not a speck),
+  // raised to 7.0 m so he silhouettes against the SKY, not the orange
+  // fireball. Bright IDPD-blue uniform (cloned material, so no other
   // heavy is recolored) so the tumbling figure reads at a glance.
-  const flyP = offsetFrom(bp.x, bp.z, H, 3, -13);
+  const flyP = offsetFrom(bp.x, bp.z, H, -4, -9);
   const flyer = spawnEnemy(G, flyP.x, flyP.z, 'heavy');
-  flyer.mesh.position.y = 6.0;
-  flyer.mesh.rotation.set(-0.9, 1.2, 0.7); // thrown flat, tumbling
+  flyer.mesh.position.y = 7.0;
+  flyer.mesh.rotation.set(-0.5, 1.2, 0.4); // thrown, tumbling — more upright so he reads
   flyer.mesh.traverse((o) => {
     const m = o.material;
     if (m && m.color && m.color.getHex() === 0x5a5f66) {
@@ -630,17 +622,13 @@ function stageCombat(G) {
     + '<div style="font:700 13px system-ui,sans-serif;color:#7ec8e8;margin-top:3px;">UNLOCKED: JOB 6 — KONFRONTASI</div>';
   const hudEl = document.getElementById('hud');
   if (hudEl) hudEl.appendChild(banner);
-  // Camera: LOW, looking UP at Wowo — the previous angles put him dead
-  // against the fireball / ground, where a dark upright figure reads as
-  // "standing". From below, he silhouettes against the orange SKY in the
-  // upper-left of frame, the jetpack flame and smoke trail hanging below
-  // him, while the blast sits centre-right. Height -3 puts the camera at
-  // y≈2, looking up. Aim AT the blast (not the midpoint): that pushes Wowo
-  // left, clear of the MISSION PASSED banner that covered him before.
-  // Dist 6 keeps him large (~140 px) instead of a thin dark speck; aim
-  // y 5.0 so his head clears the top edge (dist 5 cut him off).
-  placeChaseCamera(G, G.player.pos, H, 6, -3.0, 0, 0, 64, 4);
-  G.camera.lookAt(bp.x, 5.0, bp.z);
+  // Camera: closer (dist 5.5) and a touch higher than the old low angle
+  // (y ~3.5, still below Wowo's 5.0 so he silhouettes against the sky,
+  // not the ground) — a full top-down angle foreshortens him and hides
+  // him behind the fireball. Aim AT the blast, y 4.0, so the drops on
+  // the ground read below it. Wowo stays large, left of the banner.
+  placeChaseCamera(G, G.player.pos, H, 5.5, -1.5, 0, 0, 64, 4);
+  G.camera.lookAt(bp.x, 4.0, bp.z);
   G.camera.updateProjectionMatrix();
   const popLayer = document.getElementById('score-popups');
   if (popLayer) popLayer.style.top = '20%';
