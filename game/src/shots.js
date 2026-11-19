@@ -432,6 +432,17 @@ function restageSky(G, mode) {
     hideSunParts(); moon();
     setFog(0x0a0a18); setHemi(0x2a2a4a, 0x1a1a2a, 0.35);
     setSunLight(200, 400, 150, 0x8a8ab8, 0.5); setFill(0x3a4a7a, 0.25); setClouds(0.25);
+  } else if (mode === 'lowpoly') {
+    // V7 — clean bright low-poly morning: light warm-blue zenith, warm
+    // cream horizon, high warm sun, strong warm bounce so no face of the
+    // city goes muddy. Same sky rig as the other presets (dome uniforms,
+    // sun disc/glow, fog, hemi, sun light, fill) — only the values change,
+    // so the locked cover composition (sun in frame, skyline, sea) survives
+    // while the mood flips from dusk drama to warm and neat.
+    setDome(0x6fb3e8, 0xa8d8f0, 0xffe8b8, 0xffd28a);
+    placeSun(-700, 280, -320, 0xfffbe8, 0xffe8a0, 0xffe8b0, 380);
+    setFog(0xffe0b8); setHemi(0xfff2d8, 0x9a8a6a, 1.6);
+    setSunLight(-200, 380, -100, 0xfff2d8, 3.0); setFill(0x9ab8e8, 0.6); setClouds(0.9);
   } else { // 'evening' — the locked sunset formula: restore buildSky defaults
     setDome(0x2a2a5e, 0x8a3a6e, 0xe8763a, 0xffb347);
     placeSun(-800, 95, -320, 0xfff6d8, 0xffd27a, 0xffc27a, 560);
@@ -439,6 +450,31 @@ function restageSky(G, mode) {
     setFog(0xe08a4a); setHemi(0xffc890, 0x4a3a5a, 0.9);
     setSunLight(-260, 150, -130, 0xffb36b, 2.4); setFill(0x5a6ab8, 0.4); setClouds(0.85);
   }
+}
+
+// V7 — low-poly restyle pass (staging only). The game itself is unchanged:
+// this traverses the STAGED scene once, after every staged mesh exists, and
+// (a) switches every standard material to flat shading so the boxy city,
+// cars and figures read as crisp low-poly facets, (b) caps metalness — with
+// no environment map, metal renders near-black — and lifts matte roughness
+// so surfaces read as clean matte toy plastic, never muddy. Glass and water
+// (already glossy, roughness < 0.3) are left alone, and colours/emissives
+// are never touched — the bright warm palette comes from the lowpoly sky
+// preset, not from repainting. Shared materials mutate in place on purpose:
+// one material colours every mesh that uses it, so the whole city changes
+// in one pass. The shot sim is frozen, so nothing here leaks into live play.
+function applyLowPoly(G) {
+  const seen = new Set();
+  G.scene.traverse((o) => {
+    const m = o.material;
+    if (!m || seen.has(m)) return;
+    seen.add(m);
+    if (!m.isMeshStandardMaterial) return;
+    m.flatShading = true;
+    m.metalness = Math.min(m.metalness, 0.15);
+    if (m.roughness >= 0.3) m.roughness = Math.max(m.roughness, 0.85);
+    m.needsUpdate = true;
+  });
 }
 
 // Digital clock panel (staging DOM, shots.js only). The HUD already has
@@ -639,16 +675,18 @@ function stageChase(G) {
   G.player.money = 38420;
   G.player.health = 100;
   G.player.armour = 50;
-  // V4: clock drives the sky preset — EVENING 18:36 (dusk, locked formula).
+  // V7: clock drives the sky preset — MORNING 09:48, the low-poly look
+  // (bright, warm, clean). Composition is V6's, only the light changes.
   G.stats.playSeconds = 0;
-  restageSky(G, 'evening');
+  restageSky(G, 'lowpoly');
   // V3-6: nitro owned so the gauge reads NITRO READY, not NOT INSTALLED.
   if (!G.garage) G.garage = { owned: {} };
   if (!G.garage.owned) G.garage.owned = {};
   G.garage.owned.nitro = 1;
 
-  // Sun flare right where the chase is heading.
-  addSunFlare(G, -700, 135, -245, 320);
+  // Sun flare right where the chase is heading (V7: rides the low-poly
+  // sun's higher position).
+  addSunFlare(G, -700, 280, -320, 300);
   // Neon billboards lining the road — pink casino sign (south side, facing
   // north toward the road) and a cyan island sign (north side, facing south).
   addBillboard(G, -184, -270, Math.PI, 'CASINO DORADA', '#ff5ad9', '★ OPEN ALL NIGHT ★');
@@ -870,9 +908,10 @@ function stageChase(G) {
   // (PX-23, PZ+13): 35 m along the new view dir from the camera.
   G.camera.lookAt(PX - 23, 0.8, PZ + 13);
   G.camera.updateProjectionMatrix();
+  applyLowPoly(G); // V7: flat-shaded low-poly restyle, after all staging
   renderHUD(G);
   renderMinimap(G);
-  buildClockPanel(G, '18:36', 18.6, 1, 'hud'); // EVENING, sun low right
+  buildClockPanel(G, '09:48', 9.8, 1, 'hud'); // MORNING, sun high
 }
 
 // ---------------------------------------------------------------- title
@@ -893,7 +932,7 @@ function stageTitle(G) {
   startMission(G, 5); // Job 6 Konfrontasi — 5 jobs done
   saveGame(G); // writes the real save; showTitle reads it via saveSummary()
   G.setMode('title');
-  restageSky(G, 'afternoon'); // V4: bright blue day, high white sun
+  restageSky(G, 'lowpoly'); // V7: bright warm low-poly morning, not blue afternoon
   // Westward view: Casino Row towers + beach under the day sky, sun in frame.
   // showTitle (via setMode) paints the portraits and reveals HOW TO PLAY.
   // (No sunset flare here — the afternoon sun comes from restageSky.)
@@ -923,17 +962,21 @@ function stageTitle(G) {
     document.head.appendChild(f5style);
   }
   // V5 F5 (clouds): hide any cloud whose projected centre falls within
-  // 220 px of the relocated sun disc (~(267,26)), so no cloud crosses
-  // the disc. NOTE: Vector3.project needs the camera's matrixWorld
+  // 220 px of the sun disc, so no cloud crosses the disc. NOTE: Vector3.project needs the camera's matrixWorld
   // current — updateMatrixWorld() first (without it the loop projected
-  // with the BOOT camera and hid the wrong clouds).
+  // with the BOOT camera and hid the wrong clouds). V7: the sun position
+  // is projected live instead of hard-coded, so the hide works for the
+  // low-poly sun too.
   const THREE = G.three;
   const projV = new THREE.Vector3();
   G.camera.updateMatrixWorld();
+  const sunProj = new THREE.Vector3();
+  sunProj.copy(G.sky.sun.position).project(G.camera);
+  const sunSx = (sunProj.x + 1) / 2 * 1280, sunSy = (1 - sunProj.y) / 2 * 720;
   for (const cl of (G.sky.clouds || [])) {
     projV.copy(cl.position).project(G.camera);
     const sx = (projV.x + 1) / 2 * 1280, sy = (1 - projV.y) / 2 * 720;
-    if (Math.hypot(sx - 267, sy - 26) < 220) cl.visible = false;
+    if (Math.hypot(sx - sunSx, sy - sunSy) < 220) cl.visible = false;
   }
   // V5 F7: lift the dark lower city — warm lights over the foreground
   // streets (probe: (-60,20,80)->(585,471), (20,20,20)->(923,483)).
@@ -943,7 +986,8 @@ function stageTitle(G) {
     G.scene.add(l);
   }
   G.renderer.render(G.scene, G.camera);
-  buildClockPanel(G, '13:00', 13.0, 2, 'title'); // AFTERNOON, sun high centre-top
+  buildClockPanel(G, '10:24', 10.4, 2, 'title'); // MORNING, sun high centre-top
+  applyLowPoly(G); // V7: flat-shaded low-poly restyle (title re-renders below in the shot harness)
 }
 
 // ---------------------------------------------------------------- combat
@@ -966,9 +1010,12 @@ function stageCombat(G) {
   G.player.health = 82;
   G.player.armour = 40;
   G.player.money = 12500;
-  // V4: clock drives the sky preset — NIGHT, DAY 1 22:36.
+  // V7: clock drives the sky preset — MORNING 10:12, the low-poly look
+  // (bright, warm, clean). The jetpack/bazooka/fire moment stays; only the
+  // light changes — night's dark sky is gone, so the blast and tracers
+  // read against a warm bright sky instead of black.
   G.stats.playSeconds = 14400;
-  restageSky(G, 'night');
+  restageSky(G, 'lowpoly');
   setWanted(G, 2);
   G.police.units = [
     { name: 'UNIT 07', dist: 120, status: 'PURSUIT', mesh: null },
@@ -1276,11 +1323,14 @@ function stageCombat(G) {
 
   // Night street lights along the x=120 road so the night scene reads
   // (fire/tracers/muzzle + police light bars already help; the warm pools
-  // on the asphalt sell the street lighting).
+  // on the asphalt sell the street lighting). V7: kept under the low-poly
+  // morning sun — they read as faint warm pools now, harmless.
   addStreetLights(G, [[111.5, 248], [128.5, 256], [111.5, 264]]);
   // Lit windows come free at night: the building windows are an
   // InstancedMesh with MeshBasicMaterial (unlit, warm glass), so they stay
   // bright while the Standard-material bodies go dark — verify in the render.
+  // V7: same windows stay bright under the morning sun.
+  applyLowPoly(G); // V7: flat-shaded low-poly restyle, after all staging
 
   showDialogue(G, 'WOWO', 'Three of them. The cache is behind that wall. Move.', 60000);
   pushScorePopup(G, '-220', 'damage', 'BAZOOKA HIT');
@@ -1313,7 +1363,7 @@ function stageCombat(G) {
   if (popLayer) popLayer.style.top = '20%';
   renderHUD(G);
   renderMinimap(G);
-  buildClockPanel(G, '22:36', 22.6, 1, 'hud'); // NIGHT, moon icon
+  buildClockPanel(G, '10:12', 10.2, 1, 'hud'); // MORNING, sun high
 }
 
 // ---------------------------------------------------------------- map
@@ -1358,6 +1408,7 @@ function stageMap(G) {
   }
   G.setMode('map');
   drawMap(G);
+  applyLowPoly(G); // V7: the 3D city behind the map reads low-poly too
   // The side-job legend entries (TAXI STAND / DELIVERY PICKUP / STREET
   // RACE) load via a dynamic import in map.js and nothing re-draws the
   // legend once it resolves — force one more drawMap after the import so
