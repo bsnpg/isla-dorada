@@ -125,6 +125,12 @@ export const POIS = [
   ['causeway', 'CAUSEWAY', 'dot', '#f2c230'],
   ['harbor', 'HARBOR', 'dot', '#f2c230'],
   ['ferrisWheel', 'FERRIS WHEEL', 'dot', '#f2c230'],
+  // V5 F12: the Beachfront column was a tall empty gold strip — the
+  // BOARDWALK and BEACH are real city landmarks (city.js LANDMARK_SPOTS)
+  // that had no map markers. Both sit on the west strip; different shapes
+  // (dot vs star) so the two adjacent markers still read as two places.
+  ['boardwalk', 'BOARDWALK', 'dot', '#f2c230'],
+  ['beach', 'BEACH', 'star', '#f2c230'],
   ['gas', 'GAS STATION', 'square', '#ff8a3a'],
   ['restaurant', 'RESTAURANT', 'diamond', '#ff6ab0'],
 ];
@@ -565,6 +571,11 @@ export function drawMap(G) {
   // POI markers: one shape per place type (see POIS), label on a dark pill
   // so it stays readable; labels that would run past the right edge
   // (Causeway) are right-aligned instead.
+  // V5 F13: per-POI label nudge (px down, canvas space). CAUSEWAY's pill
+  // sat on its job badges (4/8, drawn 22 px above the spot) — drop the
+  // pill below the marker instead. BEACH's pill goes below too, so it
+  // never collides with the BOARDWALK pill on the same row.
+  const LABEL_DY = { causeway: 26, beach: 26 };
   const landmarks = (G.city && G.city.landmarks) || {};
   c.font = '700 12px system-ui, sans-serif';
   for (const [key, label, shape, color] of POIS) {
@@ -577,11 +588,12 @@ export function drawMap(G) {
     const pad = 4;
     const right = x + 10 + w + pad * 2 > SIZE - 4;
     const tx = right ? x - 10 - w - pad * 2 : x + 10;
+    const dy = LABEL_DY[key] || 0;
     c.fillStyle = 'rgba(10,14,22,0.72)';
-    c.fillRect(tx, y - 10, w + pad * 2, 18);
+    c.fillRect(tx, y - 10 + dy, w + pad * 2, 18);
     c.fillStyle = '#f5efe0';
     c.textAlign = 'left';
-    c.fillText(label, tx + pad, y + 4);
+    c.fillText(label, tx + pad, y + 4 + dy);
   }
 
   // Quest badges: numbered circles for all 8 jobs, grouped by place

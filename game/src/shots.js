@@ -95,7 +95,7 @@ function addSunFlare(G, x, y, z, scale) {
 function addSearchlightBeam(G, x, z, height) {
   const THREE = G.three;
   const coneMat = new THREE.MeshBasicMaterial({
-    color: 0xfff3b0, transparent: true, opacity: 0.20,
+    color: 0xfff3b0, transparent: true, opacity: 0.28, // V5r2: was 0.20 — the cone must read against the building
     blending: THREE.AdditiveBlending, depthWrite: false,
     side: THREE.DoubleSide, fog: false,
   });
@@ -103,7 +103,7 @@ function addSearchlightBeam(G, x, z, height) {
   cone.position.set(x, height / 2, z);
   G.scene.add(cone);
   const poolMat = new THREE.MeshBasicMaterial({
-    color: 0xffe9a0, transparent: true, opacity: 0.38,
+    color: 0xffe9a0, transparent: true, opacity: 0.5, // V5r2: was 0.38
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
   });
   const pool = new THREE.Mesh(new THREE.CircleGeometry(3.4, 24), poolMat);
@@ -350,9 +350,18 @@ function restageSky(G, mode) {
     setSunLight(-200, 300, -100, 0xffe0a8, 2.2); setFill(0x8aa8d8, 0.45); setClouds(0.9);
   } else if (mode === 'afternoon') {
     setDome(0x2a6ac8, 0x6ab8e8, 0xa8d8f0, 0xe8f0f8);
-    placeSun(-450, 300, -400, 0xfffbe8, 0xfff2b0, 0xfff8d8, 380);
-    setFog(0xbcd8e8); setHemi(0xcfe8ff, 0x8a9a8a, 1.15);
-    setSunLight(200, 400, 150, 0xfff2d8, 2.8); setFill(0x9ab8e8, 0.5); setClouds(0.9);
+    // V5 F6: sun disc moved off the subtitle line — V4 sun (-450,300,-400)
+    // projected to (671,115), dead behind "8 JOBS TO CLEAR HIS NAME".
+    // New sun (-600,300,0) projects to ~(270,80): clear of title/subtitle/
+    // quote, just above the WOWO card; glow shrunk 380 -> 260 so its soft
+    // halo only grazes the card top.
+    placeSun(-600, 330, 0, 0xfffbe8, 0xfff2b0, 0xfff8d8, 100); // V5r3: glow was 180 — its halo still washed the WOWO card; sun y 300->330 lifts the disc clear of the card top
+    // V5r2: shrink the disc itself (0.65x) — at full size it read as a big
+    // pale moon over the WOWO card instead of a sun.
+    if (sky.sun) sky.sun.scale.setScalar(0.65);
+    if (sky.sunCore) sky.sunCore.scale.setScalar(0.65);
+    setFog(0xbcd8e8); setHemi(0xcfe8ff, 0x8a9a8a, 1.3); // V5 F7: was 1.15
+    setSunLight(200, 400, 150, 0xfff2d8, 2.8); setFill(0x9ab8e8, 0.7); setClouds(0.9); // V5 F7: fill was 0.5
   } else if (mode === 'night') {
     setDome(0x0a0a20, 0x1a1a3a, 0x2a1a4a, 0x3a1a3a);
     hideSunParts(); moon();
@@ -492,6 +501,34 @@ function addStreetLights(G, spots) {
   }
 }
 
+// V5: crates + barrels — simple bright boxes/cylinders so a staged
+// foreground reads as a lived-in street, not empty grass.
+function addCrates(G, spots) {
+  const THREE = G.three;
+  const crateCols = [0xd86a20, 0x4f8ff7, 0x7ec850];
+  spots.forEach(([x, z], i) => {
+    const crate = new THREE.Mesh(
+      new THREE.BoxGeometry(0.85, 0.85, 0.85), // V5r2: was 1.1 — the crates loomed as giant abstract blocks
+      new THREE.MeshStandardMaterial({ color: crateCols[i % 3], roughness: 0.8 }),
+    );
+    crate.position.set(x, 0.43, z);
+    crate.rotation.y = i * 0.7;
+    G.scene.add(crate);
+  });
+  // Two barrels beside the crates.
+  for (const [x, z] of [
+    [spots[0][0] + 1.6, spots[0][1] + 0.8],
+    [spots[1][0] - 1.5, spots[1][1] + 1.0],
+  ]) {
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.45, 0.45, 1.0, 12), // V5r2: was r 0.55 / h 1.3
+      new THREE.MeshStandardMaterial({ color: 0x2a6a8a, roughness: 0.6, metalness: 0.3 }),
+    );
+    barrel.position.set(x, 0.5, z);
+    G.scene.add(barrel);
+  }
+}
+
 // Muzzle flash sphere + light at `from`, and a bright tracer line to `to`.
 function fireBurst(G, from, to) {
   const THREE = G.three;
@@ -522,10 +559,18 @@ function stageChase(G) {
   const PX = -140, PZ = -280, H = -Math.PI / 2;
   const car = makeCar(G, 'Aurea GT', PX, PZ, H);
   brightenCar(G, car); // gold must read gold from the shadow side too
-  G.player.mode = 'foot'; // V3-7: on foot, stealing the GT (prompt proves it)
-  G.player.pos.set(PX - 1, 0, PZ - 3.5);
-  G.player.heading = H;
-  G.driving.parked.push(car); // GT is the steal target
+  // V5r6 — PRIORITY #1 (C1): DRIVING moment, not on-foot. Staging CAN do
+  // it: enterCar has no proximity/mode gate (driving.js:353) — it only
+  // needs a non-flipped, non-wrecked car. car.speed = 31 -> HUD
+  // 112 KM/H (31 x 3.6 = 111.6 -> 112), vehicle name "Aurea GT",
+  // radio badge on, chase cam behind the GT (player.pos = car pos).
+  // Price, stated plainly: enterCar hides the player mesh and the
+  // "E — STEAL CAR" prompt only renders on foot, so the v4 car-steal
+  // moment is REPLACED by the driving moment — the parent explicitly
+  // prioritised C1 (0 km/h vs Karimbu 111 / GHK 113) over it. The GT is
+  // the driven car now, so it is NOT pushed to parked.
+  car.speed = 31;
+  G.enterCar(car);
   G.player.money = 38420;
   G.player.health = 100;
   G.player.armour = 50;
@@ -559,19 +604,29 @@ function stageChase(G) {
   const flipped2 = flipPoliceCar(G, PX - 26, PZ - 3.5, H + 0.4, { y: 1.8, pitch: 0.5, roll: Math.PI * 0.7 });
   const block = spawnPoliceCar(G, PX - 52, PZ - 1.5, -H);
   block.status = 'ROADBLOCK';
-  // V3-8 (recording #15): HAWK-1 BIG and CLOSE — 30 m from the chase camera
-  // instead of 51 m, so the rotor reads ~1.7x larger, and parked east of the
-  // cyan billboard and clear of the sun disc so it is neither occluded nor
-  // washed out. The beam lands on open asphalt at the road's north edge.
-  const heli = spawnHeli(G, PX - 18, PZ - 15, 13);
-  addSearchlightBeam(G, PX - 18, PZ - 15, 13);
+  // V5 (recording #17) — USER REFRAME: the heli is composed AGAINST the
+  // green Casino Row building, not the sky. The building face (south side,
+  // z≈-262) projects to screen-left/centre; the old north-side heli
+  // (PX-18, PZ-15) projected top-right against open sky with its rotor
+  // cropped (probe: box corners sy -53..127, sx 872..1223). The new heli
+  // sits south of the road at (PX-32, PZ+14, 9) — probe centre (451,247) —
+  // fully in frame against the building wall, clear of the sun (798,214)
+  // and of the CASINO DORADA billboard text (560,241). A pure camera pan
+  // could not do this: the building and the old heli sit on opposite
+  // sides of the road, so only moving the heli onto the building's
+  // sightline works. The beam + pool move with it (south sidewalk).
+  const heli = spawnHeli(G, PX - 32, PZ + 14, 9);
+  addSearchlightBeam(G, PX - 32, PZ + 14, 9);
   brightenHeli(G, heli); // V4: light blue-white body + visible rotor, never a silhouette
+  // V5r2: heli 1.3x bigger — at 1.0x it read as a small white box (160 px)
+  // against the building; 1.3x keeps it fully in frame (~215 px wide).
+  heli.mesh.scale.setScalar(1.3);
   G.police.units = [
     { name: 'UNIT 23', dist: 5, status: 'RAMMING', mesh: ram.mesh },
     { name: 'UNIT 12', dist: 8, status: 'FLIPPED', mesh: flipped.mesh },
     { name: 'UNIT 41', dist: 26, status: 'FLIPPED', mesh: flipped2.mesh },
     { name: 'UNIT 07', dist: 52, status: 'ROADBLOCK', mesh: block.mesh },
-    { name: 'HAWK-1', dist: 30, status: 'SEARCHLIGHT', mesh: heli.mesh },
+    { name: 'HAWK-1', dist: 35, status: 'SEARCHLIGHT', mesh: heli.mesh },
     { name: 'UNIT 31', dist: 210, status: 'PURSUIT', mesh: null },
   ];
 
@@ -672,6 +727,18 @@ function stageChase(G) {
   const nr1 = poseRunPed(spawnPed(G, PX - 62, PZ - 8), W);
   nr1.mesh.position.set(PX - 62, 0.10, PZ - 8.5); // north sidewalk, far depth
 
+  // V5 F1: fill the dead bottom-right (north-shoulder grass + minimap
+  // zone). Probe: (-142,1,-291) -> (943,496) — a car there reads
+  // right-of-centre above the minimap instead of empty grass. Two fleeing
+  // peds on the north sidewalk give the corner life without touching the
+  // beam pool.
+  const t8 = spawnTrafficCar(G, PX - 10, PZ - 11, H, 'Cayo Coupe'); // V5r3: was (PX-2, PZ-11) — moved west to make room for the foreground grass car below
+  brightenCar(G, t8);
+  const nrf1 = poseRunPed(spawnPed(G, PX - 16, PZ - 9), W);
+  nrf1.mesh.position.set(PX - 16, 0.10, PZ - 9); // north sidewalk, fleeing west
+  const nrf2 = poseRunPed(spawnPed(G, PX - 24, PZ - 9), W);
+  nrf2.mesh.position.set(PX - 24, 0.10, PZ - 9); // north sidewalk, fleeing west
+
   // V3 density: a second downed officer on the south shoulder with his own
   // loot — the flipped units threw two men out, not one.
   spawnDownedEnemy(G, PX - 18, PZ + 7.6, 'heavy');
@@ -687,11 +754,17 @@ function stageChase(G) {
   G.combat.weaponIndex = 1; // SMG in the rack
   G.audio.radioIndex = 0;
   showDialogue(G, 'WOWO', 'They will never take me alive. Not on my island.', 60000);
-  brightenWowo(G); // V4: jacket + skin lift so Wowo reads in shadow
-  // Camera close at Wowo's shoulder: Wowo + GT big in the foreground, the
-  // flipped units, roadblock, heli and sunset ahead, prompt on the steal.
-  // V4: dist 8.5 (was 10.5) — Wowo bigger, chase chaos closer.
-  placeChaseCamera(G, G.player.pos, H, 8.5, 4.2, 0, -2, 62, 4.5);
+  // V5r6: no brightenWowo — the player mesh is hidden in the car.
+  // The warm key light stays: it now keys the driven GT + road from the
+  // camera side so the gold GT reads gold, not a black box.
+  const THREE = G.three;
+  const wowoLight = new THREE.PointLight(0xffc27a, 120, 14, 1.6); // V5r2: was 70
+  wowoLight.position.set(PX + 4, 3, PZ - 5);
+  G.scene.add(wowoLight);
+  // Chase cam behind the DRIVEN GT (player.pos = car pos after enterCar):
+  // GT big in the foreground, flipped units, roadblock, heli and sunset
+  // ahead. V4: dist 8.5 (was 10.5). V5: dist 7.5 — GT bigger still.
+  placeChaseCamera(G, G.player.pos, H, 7.5, 4.2, 0, -2, 62, 4.5);
   G.camera.lookAt(PX - 26, 0.8, PZ - 1);
   G.camera.updateProjectionMatrix();
   renderHUD(G);
@@ -732,6 +805,40 @@ function stageTitle(G) {
   G.camera.lookAt(-260, 28, -150);
   G.camera.fov = 58;
   G.camera.updateProjectionMatrix();
+  // V5r5 F5 (ROOT CAUSE FOUND): the "flare blob" on the WOWO card was
+  // NEVER a cloud or the sun — it is a DOM radial-gradient ::before on
+  // #title-screen (title.js, PRE-CUT: 150 px at left 12% / top 9% =
+  // screen (154-304, 65-215), dead on the WOWO card). That is why hiding
+  // clouds never moved it. Staging override from shots.js (allowed file):
+  // hide that pseudo-element; the 3D sun disc now carries the top-left
+  // light instead. (title.js itself is untouched.)
+  let f5style = document.getElementById('v5-title-glow-off');
+  if (!f5style) {
+    f5style = document.createElement('style');
+    f5style.id = 'v5-title-glow-off';
+    f5style.textContent = '#title-screen::before{display:none !important}';
+    document.head.appendChild(f5style);
+  }
+  // V5 F5 (clouds): hide any cloud whose projected centre falls within
+  // 220 px of the relocated sun disc (~(267,26)), so no cloud crosses
+  // the disc. NOTE: Vector3.project needs the camera's matrixWorld
+  // current — updateMatrixWorld() first (without it the loop projected
+  // with the BOOT camera and hid the wrong clouds).
+  const THREE = G.three;
+  const projV = new THREE.Vector3();
+  G.camera.updateMatrixWorld();
+  for (const cl of (G.sky.clouds || [])) {
+    projV.copy(cl.position).project(G.camera);
+    const sx = (projV.x + 1) / 2 * 1280, sy = (1 - projV.y) / 2 * 720;
+    if (Math.hypot(sx - 267, sy - 26) < 220) cl.visible = false;
+  }
+  // V5 F7: lift the dark lower city — warm lights over the foreground
+  // streets (probe: (-60,20,80)->(585,471), (20,20,20)->(923,483)).
+  for (const [lx, lz] of [[-160, -10], [-90, 40], [-20, 90], [-120, 100]]) {
+    const l = new THREE.PointLight(0xffe0b0, 150, 70, 1.6);
+    l.position.set(lx, 30, lz);
+    G.scene.add(l);
+  }
   G.renderer.render(G.scene, G.camera);
   buildClockPanel(G, '13:00', 13.0, 2, 'title'); // AFTERNOON, sun high centre-top
 }
@@ -784,24 +891,38 @@ function stageCombat(G) {
   // (and above the dialogue box, which covers the bottom-centre of frame),
   // and grow the jetpack flame so the thrust reads at a glance.
   setJetpack(G, true);
-  G.player.pos.y = 5.0;
+  // V5 F8: Wowo LOWER + BIGGER + PERSON-first. V4 had him at y 5.0 with a
+  // 2.0x flame — probe: head sy 18 (top edge, behind the JOB panel),
+  // chest (319,104), flame dominating. Now y 3.4 (head ~sy 190, clear of
+  // the top panels), mesh 1.25x, flame back to the 1.2x default (effective
+  // 1.5x through the mesh scale — still smaller than V4's 2.0x).
+  G.player.pos.y = 3.4;
   const jpFlame = G.player.mesh && G.player.mesh.userData
     ? G.player.mesh.userData.jetpackFlame : null;
-  if (jpFlame) jpFlame.scale.setScalar(2.0); // V4: was 1.8 — slightly bigger thrust
+  if (jpFlame) jpFlame.scale.setScalar(1.0); // V5r4: was 1.2
+  G.player.mesh.scale.setScalar(1.2); // V5 F8: Wowo bigger (was 1.25 — 1.25 + close camera cropped his tanks at the top edge)
+  // V5r3 F8: 3/4 profile — straight down his back, the jetpack tanks hid
+  // the person entirely. Turned toward the camera so his right side (arm,
+  // hip, leg) reads beside the tanks instead of behind them.
+  // V5r4: full profile (H - 0.9) — at 0.45 the tanks still covered the
+  // torso; facing east, the camera (south) sees head/torso/arm/legs in a
+  // row with the jetpack behind him. Flame 1.0x (was 1.2x) so the thrust
+  // reads smaller than the person.
+  G.player.mesh.rotation.y = H - 0.9;
   brightenWowo(G); // V4: jacket + tanks lift so the figure reads as a PERSON with a jetpack
   // Jetpack smoke trail below Wowo — the rising puffs are what sells
   // "he flew up here" at a glance (kept >8 m from the blast point so the
   // smoke-dimming below never touches them).
-  spawnSmoke(G, PX, 4.2, PZ, 1.2);
-  spawnSmoke(G, PX, 3.2, PZ, 1.0);
-  spawnSmoke(G, PX, 2.2, PZ, 0.9);
+  spawnSmoke(G, PX, 2.8, PZ, 1.2);
+  spawnSmoke(G, PX, 2.0, PZ, 1.0);
+  spawnSmoke(G, PX, 1.2, PZ, 0.9);
   // Warm key light on Wowo from the CAMERA side (behind-above him): he
   // faces away from the western sun, so his front reads near-black without
   // it — the light lifts his jacket, skin and the jetpack tanks out of the
   // dark sunset sky. Placed toward the camera so his BACK (tanks + flame,
   // what the camera sees) is lit, not just his front.
-  const wowoLight = new THREE.PointLight(0xffc27a, 150, 16, 1.6);
-  wowoLight.position.set(PX - Math.sin(H) * 3, 7, PZ - Math.cos(H) * 3);
+  const wowoLight = new THREE.PointLight(0xffc27a, 200, 16, 1.6);
+  wowoLight.position.set(PX - Math.sin(H) * 3, 5.5, PZ - Math.cos(H) * 3);
   G.scene.add(wowoLight);
 
   // --- the blast itself, 14 m ahead of Wowo, dead centre of the frame ---
@@ -816,7 +937,7 @@ function stageCombat(G) {
   // at the blast point, or their white wash turns the fireball cream.
   for (const ex of G.combat._explosions) {
     if (ex.kind === 'fireball' && ex.group) {
-      ex.group.scale.setScalar(1.15);
+      ex.group.scale.setScalar(1.0); // V5 F11: was 1.15 — smaller blast mass
       for (const m of ex.mats || []) m.emissiveIntensity = 1.0;
     }
   }
@@ -829,8 +950,8 @@ function stageCombat(G) {
       }
     }
   }
-  addFire(G, bp.x, bp.z, 2.6);
-  addFire(G, bp.x - 2, bp.z + 1.5, 1.8);
+  addFire(G, bp.x, bp.z, 1.9); // V5 F11: was 2.6 — shrink the flame mass
+  addFire(G, bp.x - 2, bp.z + 1.5, 1.3); // V5 F11: was 1.8
   spawnDamageNumber(G, bp.x, 5.5, bp.z, '-220', '#ff8a3a');
 
   // --- a CAR thrown through the air by the blast (posed directly) ---
@@ -916,14 +1037,14 @@ function stageCombat(G) {
   // toward the player, and the BAZOOKA shot itself — a bright tracer from
   // Wowo's gun to the heart of the blast, plus a rocket frozen mid-flight
   // halfway there.
-  const pPos = new THREE.Vector3(PX, 5.0, PZ);
+  const pPos = new THREE.Vector3(PX, 3.4, PZ); // V5 F8: Wowo now at y 3.4
   for (const e of [e1, e2]) {
     const from = new THREE.Vector3(e.pos.x, 1.35, e.pos.z);
-    const to = new THREE.Vector3(pPos.x + (G.rng() - 0.5) * 1.2, 5.0, pPos.z + (G.rng() - 0.5) * 1.2);
+    const to = new THREE.Vector3(pPos.x + (G.rng() - 0.5) * 1.2, 4.4, pPos.z + (G.rng() - 0.5) * 1.2); // V5 F8: was 5.0
     fireBurst(G, from, to);
   }
   const gunFrom = new THREE.Vector3(
-    pPos.x + Math.sin(H) * 0.6, 6.0, pPos.z + Math.cos(H) * 0.6,
+    pPos.x + Math.sin(H) * 0.6, 4.6, pPos.z + Math.cos(H) * 0.6, // V5 F8: was 6.0
   );
   const blastTop = new THREE.Vector3(bp.x, 2.5, bp.z);
   fireBurst(G, gunFrom, blastTop);
@@ -1008,11 +1129,16 @@ function stageCombat(G) {
   // set bright directly (the flashing update loop never runs in the frozen
   // shot; userData.lightRed/lightBlue are meshes with per-car cloned
   // materials, so the emissive lift touches only these two cars).
-  const pc1 = spawnPoliceCar(G, 120, 242, 0); // x=120 road, facing the blast
-  pc1.status = 'RESPONDING'; pc1.dist = 18;
+  // V5 F10: IDPD BIGGER + CLOSER in the mid-ground — both units moved ~6 m
+  // toward the blast/camera and scaled 1.25x, so the police read as cars
+  // with light bars, not distant dots (V4: (120,242)/(100,240) -> (714,410)
+  // and (314,419), small). Light bars already at 2.2 emissive.
+  const pc1 = spawnPoliceCar(G, 118, 250, 0); // x=120 road, facing the blast
+  pc1.status = 'RESPONDING'; pc1.dist = 21;
   const pc2 = spawnPoliceCar(G, 100, 240, Math.PI / 2); // z=240 cross street, facing east
-  pc2.status = 'EN ROUTE'; pc2.dist = 35;
+  pc2.status = 'EN ROUTE'; pc2.dist = 24;
   for (const pc of [pc1, pc2]) {
+    pc.mesh.scale.setScalar(1.25);
     const u = pc.mesh.userData;
     if (u.lightRed) u.lightRed.material.emissiveIntensity = 2.2;
     if (u.lightBlue) u.lightBlue.material.emissiveIntensity = 2.2;
@@ -1028,6 +1154,23 @@ function stageCombat(G) {
   blueShirt.emissive.setHex(0x0a1a3a);
   blueShirt.emissiveIntensity = 1;
   officer.mesh.traverse((o) => { if (o.material === shirtMat) o.material = blueShirt; });
+  // V5 F9: fill the empty lower half (foreground field). Probe: (110,264)
+  // -> (933,613) right-bottom, (102,259) -> ~(300,590) left-bottom — both
+  // clear of the dialogue box (sx 360-920, sy 505-570) and the speedometer.
+  // A parked IDPD unit with its light bar on (right), crates + barrels
+  // (left), a $ pickup (right, clear of the minimap), two fleeing peds.
+  const fgUnit = spawnPoliceCar(G, 109, 264, Math.PI * 0.75); // V5r2: was (110.5,264.5) — nose slid under the minimap
+  fgUnit.status = 'PARKED'; fgUnit.dist = 8;
+  const fgu = fgUnit.mesh.userData;
+  if (fgu.lightRed) fgu.lightRed.material.emissiveIntensity = 2.2;
+  if (fgu.lightBlue) fgu.lightBlue.material.emissiveIntensity = 2.2;
+  dropCash(G, 111, 265, 250);
+  addCrates(G, [[97.5, 257], [99, 258.5], [98, 256], [100.5, 257.5]]); // V5r2: moved west, clear of the downed gunman + PISTOL drop
+  const fgPed1 = poseRunPed(spawnPed(G, 101.5, 260), -0.5, false, true);
+  fgPed1.mesh.position.set(101.5, 0.10, 260); // V5r2: was (99,260) — half out of the left frame edge
+  const fgPed2 = poseRunPed(spawnPed(G, 109, 265), -0.5, false, true);
+  fgPed2.mesh.position.set(109, 0.10, 265); // foreground field, fleeing southwest, sprint
+
   // Night street lights along the x=120 road so the night scene reads
   // (fire/tracers/muzzle + police light bars already help; the warm pools
   // on the asphalt sell the street lighting).
@@ -1056,7 +1199,11 @@ function stageCombat(G) {
   // not the ground) — a full top-down angle foreshortens him and hides
   // him behind the fireball. Aim AT the blast, y 4.0, so the drops on
   // the ground read below it. Wowo stays large, left of the banner.
-  placeChaseCamera(G, G.player.pos, H, 4.5, -1.5, 0, 0, 64, 4);
+  // V5 F8: lat 2 (was 4) — Wowo more central.
+  // V5r2: dist 6.0 (was 4.5), height 0.0 (was -1.5) — at 4.5 m the lowered
+  // + enlarged Wowo subtended ~32 deg and his tanks cropped at the top
+  // edge; pulled back and level with him (cam y = 3.4) he fits whole.
+  placeChaseCamera(G, G.player.pos, H, 6.0, 0.0, 0, 0, 64, 2);
   G.camera.lookAt(bp.x, 4.0, bp.z);
   G.camera.updateProjectionMatrix();
   const popLayer = document.getElementById('score-popups');
