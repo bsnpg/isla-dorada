@@ -250,6 +250,31 @@ function flipPoliceCar(G, x, z, heading, air) {
   return unit;
 }
 
+// V4 staging (recording #16): pose a spawned ped as a RUNNING / fleeing
+// figure. The shot sim is frozen (main.js never starts the game loop), so
+// the pose persists exactly — updateTraffic never runs to overwrite it.
+// `heading` is the run direction (0=south/+z, PI/2=east/+x, -PI/2=west/-x,
+// PI=north/-z). `panic` throws both arms up instead of pumping them.
+function poseRunPed(ped, heading, panic) {
+  if (!ped || !ped.mesh) return ped;
+  const u = ped.mesh.userData;
+  if (panic) {
+    if (u.armL) u.armL.rotation.x = -2.6;
+    if (u.armR) u.armR.rotation.x = -2.6;
+    if (u.legL) u.legL.rotation.x = 0.6;
+    if (u.legR) u.legR.rotation.x = -0.6;
+  } else {
+    if (u.legL) u.legL.rotation.x = 0.85;
+    if (u.legR) u.legR.rotation.x = -0.85;
+    if (u.armL) u.armL.rotation.x = -0.75;
+    if (u.armR) u.armR.rotation.x = 0.75;
+  }
+  ped.mesh.rotation.x = 0.10; // forward lean
+  ped.mesh.rotation.y = heading;
+  ped.mesh.position.y = 0.10; // airborne mid-stride
+  return ped;
+}
+
 // Muzzle flash sphere + light at `from`, and a bright tracer line to `to`.
 function fireBurst(G, from, to) {
   const THREE = G.three;
@@ -377,6 +402,43 @@ function stageChase(G) {
   spawnPed(G, PX - 2, PZ - 7.5);
   spawnPed(G, PX - 18, PZ + 7.5);
   spawnPed(G, PX - 40, PZ - 7.5);
+
+  // V4 staging (recording #16), round 2: every runner is PINNED to an
+  // explicit spot. Round 1 relied on spawnPed's random sidewalk side and
+  // the probe (window.__G) showed why that fails here: the camera sits
+  // ON the north sidewalk line (z=-288), so every north-sidewalk figure
+  // at any x projects to the same screen x (~765) — the runners piled
+  // into one unreadable column. The south sidewalk and the road spread
+  // across the frame instead, so the crowd lives there; the panicker
+  // moves to the south sidewalk too (big, facing the flipped unit,
+  // arms up) for the same reason — the north-sidewalk column buries it.
+  // Spawn x values sit >=2 m from every walker x so no two figures
+  // share a spot; the crossing pair is pinned onto the asphalt (clear
+  // of the GT at PX-1 and the flipped units at PX-8/PX-26).
+  const W = -Math.PI / 2; // fleeing west, away from the pile-up
+  const E = Math.PI / 2; // east, toward the camera
+  const panic = poseRunPed(spawnPed(G, PX - 12, PZ + 8), Math.PI, true);
+  panic.mesh.position.set(PX - 12, 0.10, PZ + 8.5); // south sidewalk, arms up at the flipped unit
+  const sr1 = poseRunPed(spawnPed(G, PX - 18, PZ + 8), W);
+  sr1.mesh.position.set(PX - 18, 0.10, PZ + 8.5);
+  const sr2 = poseRunPed(spawnPed(G, PX - 26, PZ + 8), E);
+  sr2.mesh.position.set(PX - 26, 0.10, PZ + 8.5);
+  const sr3 = poseRunPed(spawnPed(G, PX - 34, PZ + 8), W);
+  sr3.mesh.position.set(PX - 34, 0.10, PZ + 8.5);
+  const sr4 = poseRunPed(spawnPed(G, PX - 42, PZ + 8), W);
+  sr4.mesh.position.set(PX - 42, 0.10, PZ + 8.5);
+  const sr5 = poseRunPed(spawnPed(G, PX - 50, PZ + 8), W);
+  sr5.mesh.position.set(PX - 50, 0.10, PZ + 8.5);
+  const sr6 = poseRunPed(spawnPed(G, PX - 60, PZ + 8), W);
+  sr6.mesh.position.set(PX - 60, 0.10, PZ + 8.5);
+  const sr7 = poseRunPed(spawnPed(G, PX - 68, PZ + 8), E);
+  sr7.mesh.position.set(PX - 68, 0.10, PZ + 8.5);
+  const cross1 = poseRunPed(spawnPed(G, PX - 30, PZ - 8), Math.PI);
+  cross1.mesh.position.set(PX - 30, 0.10, PZ); // mid-crossing, northbound
+  const cross2 = poseRunPed(spawnPed(G, PX - 42, PZ - 8), Math.PI);
+  cross2.mesh.position.set(PX - 42, 0.10, PZ); // mid-crossing, northbound
+  const nr1 = poseRunPed(spawnPed(G, PX - 62, PZ - 8), W);
+  nr1.mesh.position.set(PX - 62, 0.10, PZ - 8.5); // north sidewalk, far depth
 
   // V3 density: a second downed officer on the south shoulder with his own
   // loot — the flipped units threw two men out, not one.
@@ -556,7 +618,10 @@ function stageCombat(G) {
   // Enemies CLOSE (8-19 m, inside the frame): two gunmen firing, one heavy
   // centre behind the blast, one DOWNED gunman flat on the ground near the
   // camera.
-  const e1p = offsetFrom(PX, PZ, H, 11, 7.5);
+  const e1p = offsetFrom(PX, PZ, H, 9, 9); // V4: was (11, 7.5) — e1 stood
+  // dead on the camera ray to the SMG drop, so the "SMG +30" label read
+  // "SM +3" behind his head (pre-existing v3 overlap). 2.5 m south puts
+  // him clear of the label while he stays a close gunman firing at Wowo.
   const e2p = offsetFrom(PX, PZ, H, 12, -8);
   const e3p = offsetFrom(PX, PZ, H, 19, 1.5);
   const downP = offsetFrom(PX, PZ, H, 8, -2.5);
@@ -638,6 +703,43 @@ function stageCombat(G) {
   rocket.lookAt(blastTop.x, blastTop.y, blastTop.z);
   rocket.scale.setScalar(1.5); // read at 20+ m, not a speck
   G.scene.add(rocket);
+
+  // V4 staging (recording #16), round 2: every runner is PINNED to an
+  // explicit spot. Round 1 relied on spawnPed's random sidewalk side and
+  // the probe (window.__G) showed the failures: the 4 north runners
+  // all landed west and paired up at identical screen spots behind the
+  // fireball, and the second crossing ped stood exactly on the view ray
+  // to the SMG drop, covering its "+30" label. The north runners move
+  // to the east sidewalk (spread 4 m, clear of the flames), the south
+  // runners are pinned to their round-1 spots (which read well), the
+  // second crossing ped moves south of the label ray, and the southbound
+  // car moves from z=266 (off-frame right, sx 1282) to z=262 (in frame).
+  const N = Math.PI; // fleeing north, away from the blast
+  const S = 0; // fleeing south, toward the camera
+  const nr1 = poseRunPed(spawnPed(G, 124, 244), N);
+  nr1.mesh.position.set(128.5, 0.10, 242); // east sidewalk, clear of the flames
+  const nr2 = poseRunPed(spawnPed(G, 124, 247), N);
+  nr2.mesh.position.set(128.5, 0.10, 246);
+  const nr3 = poseRunPed(spawnPed(G, 124, 250), N);
+  nr3.mesh.position.set(128.5, 0.10, 250);
+  const sr1 = poseRunPed(spawnPed(G, 113, 259), S);
+  sr1.mesh.position.set(111.5, 0.10, 259); // west sidewalk, toward the camera
+  const sr2 = poseRunPed(spawnPed(G, 115, 260), S);
+  sr2.mesh.position.set(111.5, 0.10, 260);
+  const sr3 = poseRunPed(spawnPed(G, 127, 258), S);
+  sr3.mesh.position.set(128.5, 0.10, 258); // east sidewalk, toward the camera
+  const ccross1 = poseRunPed(spawnPed(G, 120, 251), Math.PI / 2);
+  ccross1.mesh.position.set(120, 0.10, 251); // crossing east, clear of the blast
+  const ccross2 = poseRunPed(spawnPed(G, 122, 260), Math.PI / 2);
+  ccross2.mesh.position.set(122, 0.10, 260); // crossing east, south of the SMG label ray
+  const field1 = poseRunPed(spawnPed(G, 106, 261), -0.5);
+  field1.mesh.position.set(106, 0.10, 261); // foreground field, fleeing southwest
+  const field2 = poseRunPed(spawnPed(G, 109, 259), -0.5);
+  field2.mesh.position.set(109, 0.10, 259); // foreground field, fleeing southwest
+  const cSouth = spawnTrafficCar(G, 120, 262, 0, 'Palma Cruiser'); // southbound
+  const cNorth = spawnTrafficCar(G, 120, 246, Math.PI, 'Solano S'); // northbound
+  brightenCar(G, cSouth);
+  brightenCar(G, cNorth);
 
   showDialogue(G, 'WOWO', 'Three of them. The cache is behind that wall. Move.', 60000);
   pushScorePopup(G, '-220', 'damage', 'BAZOOKA HIT');
