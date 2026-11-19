@@ -86,6 +86,33 @@ function addSunFlare(G, x, y, z, scale) {
   return sprite;
 }
 
+// Searchlight beam: a translucent additive cone from the heli belly straight
+// down to the road, plus a bright pool disc where it lands. Staging only —
+// the heli already carries a real SpotLight; this is the visible beam the
+// camera can read in 2 seconds. The cone is open-ended and additive, so it
+// glows against dark asphalt and washes out against bright sky, like a real
+// searchlight.
+function addSearchlightBeam(G, x, z, height) {
+  const THREE = G.three;
+  const coneMat = new THREE.MeshBasicMaterial({
+    color: 0xfff3b0, transparent: true, opacity: 0.20,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+    side: THREE.DoubleSide, fog: false,
+  });
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(3.5, height, 20, 1, true), coneMat);
+  cone.position.set(x, height / 2, z);
+  G.scene.add(cone);
+  const poolMat = new THREE.MeshBasicMaterial({
+    color: 0xffe9a0, transparent: true, opacity: 0.38,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  });
+  const pool = new THREE.Mesh(new THREE.CircleGeometry(3.4, 24), poolMat);
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.set(x, 0.12, z);
+  G.scene.add(pool);
+  return { cone, pool };
+}
+
 // Neon billboard: canvas-texture plane on posts, unlit so it glows at sunset.
 // Faces `faceHeading` (the direction its front points).
 function addBillboard(G, x, z, faceHeading, text, color, sub) {
@@ -287,13 +314,18 @@ function stageChase(G) {
   const flipped2 = flipPoliceCar(G, PX - 26, PZ - 3.5, H + 0.4, { y: 1.8, pitch: 0.5, roll: Math.PI * 0.7 });
   const block = spawnPoliceCar(G, PX - 52, PZ - 1.5, -H);
   block.status = 'ROADBLOCK';
-  const heli = spawnHeli(G, PX - 40, PZ - 18, 13); // V3-5: high, clear of billboards, rotor vs sky
+  // V3-8 (recording #15): HAWK-1 BIG and CLOSE — 30 m from the chase camera
+  // instead of 51 m, so the rotor reads ~1.7x larger, and parked east of the
+  // cyan billboard and clear of the sun disc so it is neither occluded nor
+  // washed out. The beam lands on open asphalt at the road's north edge.
+  const heli = spawnHeli(G, PX - 18, PZ - 15, 13);
+  addSearchlightBeam(G, PX - 18, PZ - 15, 13);
   G.police.units = [
     { name: 'UNIT 23', dist: 5, status: 'RAMMING', mesh: ram.mesh },
     { name: 'UNIT 12', dist: 8, status: 'FLIPPED', mesh: flipped.mesh },
     { name: 'UNIT 41', dist: 26, status: 'FLIPPED', mesh: flipped2.mesh },
     { name: 'UNIT 07', dist: 52, status: 'ROADBLOCK', mesh: block.mesh },
-    { name: 'HAWK-1', dist: 38, status: 'SEARCHLIGHT', mesh: heli.mesh },
+    { name: 'HAWK-1', dist: 30, status: 'SEARCHLIGHT', mesh: heli.mesh },
     { name: 'UNIT 31', dist: 210, status: 'PURSUIT', mesh: null },
   ];
 
