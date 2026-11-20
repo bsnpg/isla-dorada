@@ -1,99 +1,64 @@
-// Keyboard + mouse input state. Classic WASD driving, mouse aim on foot.
-// Single shared instance: main.js calls Input.init(canvas) once at boot, and
-// every gameplay module reads from it. One-shot keys are consumed with
-// pressed() so a keypress fires exactly once even across fixed-step updates.
-export const Input = {
-  keys: new Set(),
-  mouseDX: 0,
-  mouseDY: 0,
-  mouseDown: false,
-  mouseClicked: false,
-  pointerLocked: false,
-  wheelDelta: 0,
+// Keyboard and mouse input. Held keys steer and drive; one-shot presses (weapon
+// keys, wheel, enter/exit car, map, pause) are queued as flags and taken once by
+// the game loop, so a press between frames is never lost or counted twice.
+export const ACTION_CONFIRM = 1;
+export const ACTION_PAUSE = 2;
+export const ACTION_MAP = 4;
+export const ACTION_EXIT_CAR = 8;
+export const ACTION_WHEEL = 16;
+export const ACTION_JETPACK = 32;
 
-  init(canvas) {
-    window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
-      this.keys.add(e.code);
-      if (e.code === 'Space') e.preventDefault();
-    });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
-    canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) { this.mouseDown = true; this.mouseClicked = true; }
-    });
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseDown = false;
-    });
-    window.addEventListener('wheel', (e) => { this.wheelDelta += e.deltaY; }, { passive: true });
-    document.addEventListener('mousemove', (e) => {
-      if (this.pointerLocked) {
-        this.mouseDX += e.movementX || 0;
-        this.mouseDY += e.movementY || 0;
-      }
-    });
-    document.addEventListener('pointerlockchange', () => {
-      this.pointerLocked = document.pointerLockElement === canvas;
-    });
-  },
+const FORWARD = new Set(['KeyW', 'ArrowUp']);
+const BACK = new Set(['KeyS', 'ArrowDown']);
+const LEFT = new Set(['KeyA', 'ArrowLeft']);
+const RIGHT = new Set(['KeyD', 'ArrowRight']);
+const CONFIRM = new Set(['Space', 'Enter']);
+const PAUSE = new Set(['Escape', 'KeyP']);
+const MAP = new Set(['KeyM']);
+const EXIT = new Set(['KeyE', 'KeyF']);
+const WHEEL = new Set(['Tab', 'KeyQ']);
+const JETPACK = new Set(['KeyJ', 'ShiftLeft']);
 
-  down(...codes) {
-    return codes.some((c) => this.keys.has(c));
-  },
+export function createInput(target) {
+  const held = new Set();
+  let actions = 0;
+  let weaponKey = 0;
+  let mouseDown = false;
+  let mouseX = 0;
+  let mouseY = 0;
 
-  pressed(code) {
-    if (this.keys.has(code)) { this.keys.delete(code); return true; }
-    return false;
-  },
+  window.addEventListener('keydown', (event) => {
+    if (event.code >= 'Digit1' && event.code <= 'Digit6') {
+      if (!event.repeat) weaponKey = Number(event.code.slice(5));
+      return;
+    }
+    held.add(event.code);
+    if (CONFIRM.has(event.code) && !event.repeat) actions |= ACTION_CONFIRM;
+    else if (PAUSE.has(event.code) && !event.repeat) actions |= ACTION_PAUSE;
+    else if (MAP.has(event.code) && !event.repeat) actions |= ACTION_MAP;
+    else if (EXIT.has(event.code) && !event.repeat) actions |= ACTION_EXIT_CAR;
+    else if (WHEEL.has(event.code) && !event.repeat) actions |= ACTION_WHEEL;
+    else if (JETPACK.has(event.code) && !event.repeat) actions |= ACTION_JETPACK;
+    if (FORWARD.has(event.code) || BACK.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code)) {
+      event.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', (event) => { held.delete(event.code); });
+  window.addEventListener('blur', () => { held.clear(); mouseDown = false; });
+  target.addEventListener('pointerdown', (event) => { mouseDown = true; mouseX = event.clientX; mouseY = event.clientY; });
+  window.addEventListener('pointerup', () => { mouseDown = false; });
+  window.addEventListener('pointermove', (event) => { mouseX = event.clientX; mouseY = event.clientY; });
 
-  // True (and consumed) if any of the given codes was pressed this frame.
-  pressedAny(...codes) {
-    for (const c of codes) if (this.pressed(c)) return true;
-    return false;
-  },
-
-  // Drop keys from the held set (used when a key both closes an overlay and would
-  // otherwise be seen again by the main loop on the next frame — e.g. M closing
-  // the map would instantly reopen it).
-  clear(...codes) {
-    for (const c of codes) this.keys.delete(c);
-  },
-
-  clearAll() {
-    this.keys.clear();
-    this.mouseDown = false;
-    this.mouseClicked = false;
-    this.mouseDX = 0;
-    this.mouseDY = 0;
-    this.wheelDelta = 0;
-  },
-
-  // Consume the per-frame mouse deltas.
-  consumeMouse() {
-    const dx = this.mouseDX, dy = this.mouseDY;
-    this.mouseDX = 0; this.mouseDY = 0;
-    return { dx, dy };
-  },
-
-  consumeClick() {
-    const c = this.mouseClicked;
-    this.mouseClicked = false;
-    return c;
-  },
-
-  // Consume accumulated wheel scroll (positive = scrolled down). Used for
-  // weapon cycling on foot when the pointer is locked.
-  consumeWheel() {
-    const d = this.wheelDelta;
-    this.wheelDelta = 0;
-    return d;
-  },
-
-  lockPointer(canvas) {
-    if (canvas && canvas.requestPointerLock) canvas.requestPointerLock();
-  },
-
-  unlockPointer() {
-    if (document.pointerLockElement) document.exitPointerLock();
-  },
-};
+  const has = (...sets) => sets.some((s) => [...s].some((c) => held.has(c)));
+  return {
+    forward() { return has(FORWARD); },
+    back() { return has(BACK); },
+    left() { return has(LEFT); },
+    right() { return has(RIGHT); },
+    sprint() { return held.has('ShiftLeft') || held.has('ShiftRight'); },
+    takeActions() { const t = actions; actions = 0; return t; },
+    takeWeaponKey() { const t = weaponKey; weaponKey = 0; return t; },
+    firing() { return mouseDown; },
+    pointer() { return { x: mouseX, y: mouseY }; },
+  };
+}
